@@ -1,11 +1,13 @@
 import { db } from "@workspace/db";
 import { botConfigTable, botLogsTable, tradeHistoryTable, activePositionsTable, aiSignalsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, gte, sql } from "drizzle-orm";
 import { exchangeService } from "./exchange";
 import { analyzeDivergences } from "./divergence";
 import { computeAtrPercent } from "./indicators";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
+
+const ANTHROPIC_MODEL = "claude-opus-4-7";
 
 interface BotStatus {
   running: boolean;
@@ -17,6 +19,9 @@ interface BotStatus {
   lastCheckedAt?: number;
   totalSignals: number;
   executedTrades: number;
+  dailyPnlUsd: number;
+  dailyPnlPercent: number;
+  halted: boolean;
 }
 
 interface AiDecision {
@@ -32,6 +37,20 @@ interface AiDecision {
 
 type BotConfigRow = typeof botConfigTable.$inferSelect;
 
+function extractJson(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) return text.slice(first, last + 1);
+  return text.trim();
+}
+
+function startOfTodayUtc(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 class BotManager {
   private running = false;
   private startTime: number | null = null;
@@ -43,6 +62,10 @@ class BotManager {
   private currentSymbols: string[] = ["BTC/USDT"];
   private currentTimeframe = "15m";
   private tickInFlight = false;
+  private halted = false;
+  private dailyPnlUsd = 0;
+  private dailyPnlPercent = 0;
+  private dailyResetDay: number = startOfTodayUtc().getTime();
 
   getStatus(): BotStatus {
     return {
@@ -55,6 +78,9 @@ class BotManager {
       lastCheckedAt: this.lastCheckedAt ?? undefined,
       totalSignals: this.totalSignals,
       executedTrades: this.executedTrades,
+      dailyPnlUsd: this.dailyPnlUsd,
+      dailyPnlPercent: this.dailyPnlPercent,
+      halted: this.halted,
     };
   }
 
@@ -94,6 +120,13 @@ class BotManager {
     await this.addLog("info", `봇 설정이 재로딩되었습니다: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
   }
 
+  /** Manually clear today's halt (e.g. user override) */
+  resetHalt() {
+    this.halted = false;
+    this.dailyResetDay = startOfTodayUtc().getTime();
+    this.addLog("info", "일일 손실 한도 일시 해제 — 거래 재개").catch(() => {});
+  }
+
   private resolveWatchSymbols(config: BotConfigRow): string[] {
     const ws = Array.isArray(config.watchSymbols) ? (config.watchSymbols as string[]) : [];
     const cleaned = ws.filter((s) => typeof s === "string" && s.length > 0);
@@ -110,9 +143,45 @@ class BotManager {
     return rows[0];
   }
 
+  private async refreshDailyPnl(config: BotConfigRow): Promise<void> {
+    const today = startOfTodayUtc().getTime();
+    if (today !== this.dailyResetDay) {
+      this.dailyResetDay = today;
+      this.halted = false;
+    }
+
+    try {
+      const [{ total }] = await db
+        .select({ total: sql<number>`coalesce(sum(${tradeHistoryTable.pnl}), 0)` })
+        .from(tradeHistoryTable)
+        .where(gte(tradeHistoryTable.createdAt, new Date(today)));
+      this.dailyPnlUsd = Number(total) || 0;
+    } catch (err) {
+      logger.warn({ err }, "Failed to compute daily PnL");
+      this.dailyPnlUsd = 0;
+    }
+
+    let portfolioBase = config.tradeAmount * 100; // fallback baseline
+    try {
+      const bal = await exchangeService.getBalance();
+      if (bal.totalUsd > 0) portfolioBase = bal.totalUsd;
+    } catch {
+      // keep fallback
+    }
+    this.dailyPnlPercent = portfolioBase > 0 ? (this.dailyPnlUsd / portfolioBase) * 100 : 0;
+
+    if (this.dailyPnlPercent <= -config.maxDailyLossPercent && !this.halted) {
+      this.halted = true;
+      await this.addLog(
+        "error",
+        `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`,
+      ).catch(() => {});
+    }
+  }
+
   private async tick() {
     if (!this.running) return;
-    if (this.tickInFlight) return; // single-flight guard against overlapping ticks
+    if (this.tickInFlight) return;
     this.tickInFlight = true;
     try {
       const config = await this.getConfig();
@@ -121,10 +190,17 @@ class BotManager {
       this.currentTimeframe = config.timeframe;
       this.lastCheckedAt = Date.now();
 
-      // First, manage any existing tracked positions (across all symbols) for TP/SL exit
+      // Update daily PnL & halt state from realized trades
+      await this.refreshDailyPnl(config);
+
+      // Always manage existing positions even if halted (we still want TP/SL exits)
       await this.manageActivePositions();
 
-      // Process each watched symbol in parallel
+      if (this.halted) {
+        await this.addLog("warning", `🛑 손실 한도 도달 상태 — 신규 진입 건너뜀 (오늘 PnL ${this.dailyPnlPercent.toFixed(2)}%)`);
+        return;
+      }
+
       const results = await Promise.allSettled(
         symbols.map((sym) => this.processSymbol(sym, config))
       );
@@ -139,6 +215,30 @@ class BotManager {
     } finally {
       this.tickInFlight = false;
     }
+  }
+
+  private async getMtfBias(symbol: string, timeframes: string[]): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    await Promise.all(timeframes.map(async (tf) => {
+      try {
+        const candles = await exchangeService.getOhlcv(symbol, tf, 200);
+        if (candles.length < 50) { out[tf] = "neutral"; return; }
+        const div = analyzeDivergences(candles, symbol, tf);
+        out[tf] = div.overallBias;
+      } catch (err) {
+        logger.warn({ err, symbol, tf }, "MTF analysis failed");
+        out[tf] = "neutral";
+      }
+    }));
+    return out;
+  }
+
+  private mtfAligned(primaryBias: string, mtf: Record<string, string>): { aligned: boolean; conflicts: string[] } {
+    if (primaryBias === "neutral") return { aligned: true, conflicts: [] };
+    const conflicts = Object.entries(mtf)
+      .filter(([, b]) => b !== "neutral" && b !== primaryBias)
+      .map(([tf, b]) => `${tf}=${b}`);
+    return { aligned: conflicts.length === 0, conflicts };
   }
 
   private async processSymbol(symbol: string, config: BotConfigRow) {
@@ -164,6 +264,27 @@ class BotManager {
       return;
     }
 
+    // MTF + funding rate (parallel)
+    const mtfTfs = config.useMtfFilter ? ((config.mtfTimeframes as string[]) ?? ["1h", "4h"]) : [];
+    const [mtf, fundingRate, openInterest] = await Promise.all([
+      mtfTfs.length > 0 ? this.getMtfBias(symbol, mtfTfs) : Promise.resolve({} as Record<string, string>),
+      config.useFundingRate ? exchangeService.getFundingRate(symbol) : Promise.resolve(null),
+      config.useFundingRate ? exchangeService.getOpenInterest(symbol) : Promise.resolve(null),
+    ]);
+
+    // Strict MTF gate (skip AI call entirely if higher TFs disagree)
+    if (config.useMtfFilter && config.strictMtf) {
+      const { aligned, conflicts } = this.mtfAligned(divergence.overallBias, mtf);
+      if (!aligned) {
+        await this.addLog(
+          "info",
+          `${symbol} MTF 불일치로 진입 차단 — ${conflicts.join(", ")} (15m=${divergence.overallBias})`,
+          symbol,
+        );
+        return;
+      }
+    }
+
     const atrPercent = computeAtrPercent(candles, 14);
     const rawDecision = await this.getAiDecision({
       symbol,
@@ -172,6 +293,9 @@ class BotManager {
       change24h: ticker.changePercent24h,
       atrPercent,
       divergence,
+      mtf,
+      fundingRate,
+      openInterest,
     });
     const decision = this.sanitizeDecision(rawDecision, ticker.price, atrPercent);
 
@@ -419,11 +543,14 @@ class BotManager {
     change24h: number;
     atrPercent: number | null;
     divergence: ReturnType<typeof analyzeDivergences>;
+    mtf: Record<string, string>;
+    fundingRate: number | null;
+    openInterest: number | null;
   }): Promise<AiDecision> {
-    const { symbol, timeframe, currentPrice, change24h, atrPercent, divergence } = input;
+    const { symbol, timeframe, currentPrice, change24h, atrPercent, divergence, mtf, fundingRate, openInterest } = input;
 
     const systemPrompt = `You are an expert crypto trading bot specialized in divergence-based scalping on the ${timeframe} timeframe.
-Use multi-indicator divergence signals (MACD, RSI, Stoch, CCI, MOM, OBV) and recent ATR volatility to predict the next ~10–20 candle price move.
+Use multi-indicator divergence signals (MACD, RSI, Stoch, CCI, MOM, OBV), multi-timeframe (MTF) bias, funding rate sentiment, and recent ATR volatility to predict the next ~10–20 candle price move.
 
 Rules:
 - expectedMovePercent must be SIGNED: positive for bullish (BUY), negative for bearish (SELL), 0 for HOLD.
@@ -431,11 +558,13 @@ Rules:
 - suggestedTakeProfit = entryPrice × (1 + expectedMovePercent/100).
 - suggestedStopLoss is on the opposite side, sized 0.4–0.7× of |expectedMovePercent| to keep R/R ≥ 1.3.
 - suggestedEntryPrice can equal the current price.
+- If higher MTFs strongly disagree with the primary bias, prefer HOLD or reduce confidence.
+- Funding rate: very positive = crowded longs (mild bearish bias); very negative = crowded shorts (mild bullish bias).
 - Set HOLD if signals are weak/conflicting.
 
-Reasoning must be in Korean and explain (1) the dominant divergence direction & strength, (2) the predicted move, (3) why these TP/SL.
+Reasoning must be in Korean (2–3 sentences) and explain (1) the dominant divergence direction & strength, (2) MTF + funding context, (3) the predicted move and chosen TP/SL.
 
-Respond ONLY with valid JSON:
+Respond ONLY with valid JSON (no markdown, no prose):
 {
   "action": "BUY"|"SELL"|"HOLD",
   "confidence": 0.0-1.0,
@@ -448,33 +577,48 @@ Respond ONLY with valid JSON:
 }`;
 
     const sigList = divergence.signals.map(s => `${s.indicator}/${s.type}@${s.strength.toFixed(2)}`).join(", ") || "none";
+    const mtfText = Object.keys(mtf).length > 0
+      ? Object.entries(mtf).map(([tf, b]) => `  - ${tf}: ${b}`).join("\n")
+      : "  (disabled)";
+    const frText = fundingRate !== null
+      ? `Funding rate: ${(fundingRate * 100).toFixed(4)}%`
+      : "Funding rate: unavailable";
+    const oiText = openInterest !== null
+      ? `Open interest: ${openInterest.toLocaleString()} contracts`
+      : "Open interest: unavailable";
+
     const userMessage = `Symbol: ${symbol}
 Timeframe: ${timeframe}
 Current Price: $${currentPrice.toFixed(2)}
 24h Change: ${change24h >= 0 ? "+" : ""}${change24h.toFixed(2)}%
 ATR (volatility): ${atrPercent !== null ? `${atrPercent.toFixed(2)}% of price` : "unknown"}
 
-Divergence Bias: ${divergence.overallBias}
+Divergence Bias (primary TF): ${divergence.overallBias}
 Bullish signals: ${divergence.bullishCount}
 Bearish signals: ${divergence.bearishCount}
 Active: ${sigList}
 
+Multi-Timeframe Bias:
+${mtfText}
+
+Futures context:
+${frText}
+${oiText}
+
 Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      max_completion_tokens: 700,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      response_format: { type: "json_object" }
+    const message = await anthropic.messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
     });
 
-    const content = completion.choices[0]?.message?.content;
+    const block = message.content[0];
+    const content = block && block.type === "text" ? block.text : "";
     if (!content) throw new Error("Empty AI response");
 
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(extractJson(content));
     const action = (parsed.action as string) === "BUY" || parsed.action === "SELL" ? parsed.action : "HOLD";
     const confidence = Math.min(1, Math.max(0, Number(parsed.confidence) || 0.5));
     const entryPrice = Number(parsed.suggestedEntryPrice) || currentPrice;

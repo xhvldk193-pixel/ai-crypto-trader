@@ -397,6 +397,9 @@ export const GetBotStatusResponse = zod.object({
   lastCheckedAt: zod.number().optional(),
   totalSignals: zod.number(),
   executedTrades: zod.number(),
+  dailyPnlUsd: zod.number(),
+  dailyPnlPercent: zod.number(),
+  halted: zod.boolean(),
 });
 
 /**
@@ -411,6 +414,9 @@ export const StartBotResponse = zod.object({
   lastCheckedAt: zod.number().optional(),
   totalSignals: zod.number(),
   executedTrades: zod.number(),
+  dailyPnlUsd: zod.number(),
+  dailyPnlPercent: zod.number(),
+  halted: zod.boolean(),
 });
 
 /**
@@ -425,6 +431,9 @@ export const StopBotResponse = zod.object({
   lastCheckedAt: zod.number().optional(),
   totalSignals: zod.number(),
   executedTrades: zod.number(),
+  dailyPnlUsd: zod.number(),
+  dailyPnlPercent: zod.number(),
+  halted: zod.boolean(),
 });
 
 /**
@@ -443,6 +452,11 @@ export const GetBotConfigResponse = zod.object({
   autoTrade: zod.boolean(),
   useAiTargets: zod.boolean(),
   checkIntervalSeconds: zod.number(),
+  maxDailyLossPercent: zod.number(),
+  useMtfFilter: zod.boolean(),
+  strictMtf: zod.boolean(),
+  mtfTimeframes: zod.array(zod.string()),
+  useFundingRate: zod.boolean(),
 });
 
 /**
@@ -461,6 +475,11 @@ export const UpdateBotConfigBody = zod.object({
   autoTrade: zod.boolean().optional(),
   useAiTargets: zod.boolean().optional(),
   checkIntervalSeconds: zod.number().optional(),
+  maxDailyLossPercent: zod.number().optional(),
+  useMtfFilter: zod.boolean().optional(),
+  strictMtf: zod.boolean().optional(),
+  mtfTimeframes: zod.array(zod.string()).optional(),
+  useFundingRate: zod.boolean().optional(),
 });
 
 export const UpdateBotConfigResponse = zod.object({
@@ -476,6 +495,11 @@ export const UpdateBotConfigResponse = zod.object({
   autoTrade: zod.boolean(),
   useAiTargets: zod.boolean(),
   checkIntervalSeconds: zod.number(),
+  maxDailyLossPercent: zod.number(),
+  useMtfFilter: zod.boolean(),
+  strictMtf: zod.boolean(),
+  mtfTimeframes: zod.array(zod.string()),
+  useFundingRate: zod.boolean(),
 });
 
 /**

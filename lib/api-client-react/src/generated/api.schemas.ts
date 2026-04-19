@@ -287,6 +287,9 @@ export interface BotStatus {
   lastCheckedAt?: number;
   totalSignals: number;
   executedTrades: number;
+  dailyPnlUsd: number;
+  dailyPnlPercent: number;
+  halted: boolean;
 }
 
 export interface BotConfig {
@@ -302,6 +305,11 @@ export interface BotConfig {
   autoTrade: boolean;
   useAiTargets: boolean;
   checkIntervalSeconds: number;
+  maxDailyLossPercent: number;
+  useMtfFilter: boolean;
+  strictMtf: boolean;
+  mtfTimeframes: string[];
+  useFundingRate: boolean;
 }
 
 export interface BotConfigUpdate {
@@ -317,6 +325,11 @@ export interface BotConfigUpdate {
   autoTrade?: boolean;
   useAiTargets?: boolean;
   checkIntervalSeconds?: number;
+  maxDailyLossPercent?: number;
+  useMtfFilter?: boolean;
+  strictMtf?: boolean;
+  mtfTimeframes?: string[];
+  useFundingRate?: boolean;
 }
 
 export type BotLogLevel = (typeof BotLogLevel)[keyof typeof BotLogLevel];

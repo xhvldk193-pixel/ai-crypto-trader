@@ -27,7 +27,14 @@ const botConfigSchema = z.object({
   minConfidence: z.coerce.number().min(0.1).max(0.99),
   autoTrade: z.boolean(),
   useAiTargets: z.boolean(),
+  maxDailyLossPercent: z.coerce.number().min(0.5).max(50),
+  useMtfFilter: z.boolean(),
+  strictMtf: z.boolean(),
+  mtfTimeframes: z.array(z.string().min(1)),
+  useFundingRate: z.boolean(),
 });
+
+const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
 
 type BotConfigFormValues = z.infer<typeof botConfigSchema>;
 
@@ -57,6 +64,11 @@ export default function BotControl() {
       minConfidence: 0.7,
       autoTrade: false,
       useAiTargets: true,
+      maxDailyLossPercent: 3,
+      useMtfFilter: true,
+      strictMtf: true,
+      mtfTimeframes: ["1h", "4h"],
+      useFundingRate: true,
     },
   });
 
@@ -76,6 +88,11 @@ export default function BotControl() {
         minConfidence: config.minConfidence,
         autoTrade: config.autoTrade,
         useAiTargets: config.useAiTargets ?? true,
+        maxDailyLossPercent: config.maxDailyLossPercent ?? 3,
+        useMtfFilter: config.useMtfFilter ?? true,
+        strictMtf: config.strictMtf ?? true,
+        mtfTimeframes: config.mtfTimeframes && config.mtfTimeframes.length > 0 ? config.mtfTimeframes : ["1h", "4h"],
+        useFundingRate: config.useFundingRate ?? true,
       });
     }
   }, [config, form]);
@@ -116,7 +133,20 @@ export default function BotControl() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">봇 제어</h1>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          {status && (
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
+              status.halted ? 'border-destructive bg-destructive/10 text-destructive' :
+              status.dailyPnlUsd >= 0 ? 'border-green-500/40 bg-green-500/10 text-green-500' :
+              'border-yellow-500/40 bg-yellow-500/10 text-yellow-500'
+            }`}>
+              <span className="text-xs uppercase tracking-wider opacity-75">오늘 PnL</span>
+              <span className="font-mono font-bold">
+                {status.dailyPnlUsd >= 0 ? '+' : ''}${status.dailyPnlUsd.toFixed(2)} ({status.dailyPnlPercent >= 0 ? '+' : ''}{status.dailyPnlPercent.toFixed(2)}%)
+              </span>
+              {status.halted && <Badge variant="destructive" className="ml-1">손실 한도 도달</Badge>}
+            </div>
+          )}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-md border ${
             status?.running ? 'border-primary bg-primary/10 text-primary' : 'border-muted bg-muted text-muted-foreground'
           }`}>
@@ -296,6 +326,109 @@ export default function BotControl() {
                           <FormLabel className="text-base">AI 자동 익절/손절</FormLabel>
                           <FormDescription>
                             켜면 AI가 예측한 변동폭으로 TP/SL을 자동 설정합니다. 끄면 위의 고정 % 값이 사용됩니다.
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="maxDailyLossPercent"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>일일 최대 손실 한도 (%)</FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.1" {...field} />
+                        </FormControl>
+                        <FormDescription>오늘 누적 손실이 이 비율을 넘으면 자동으로 신규 진입을 중단합니다.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="useMtfFilter"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">MTF 필터 (멀티 타임프레임)</FormLabel>
+                          <FormDescription>
+                            상위 타임프레임 다이버전스 추세를 함께 분석해 진입 신뢰도를 높입니다.
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="mtfTimeframes"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>MTF 타임프레임</FormLabel>
+                        <FormControl>
+                          <div className="flex flex-wrap gap-2">
+                            {MTF_OPTIONS.map((tf) => {
+                              const checked = field.value?.includes(tf) ?? false;
+                              return (
+                                <label key={tf} className="flex items-center gap-2 cursor-pointer rounded-md border px-3 py-1.5 hover:bg-muted/50">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => {
+                                      const current = field.value ?? [];
+                                      if (next) {
+                                        if (!current.includes(tf)) field.onChange([...current, tf]);
+                                      } else {
+                                        field.onChange(current.filter((x) => x !== tf));
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-xs font-mono">{tf}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="strictMtf"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">엄격 MTF 모드</FormLabel>
+                          <FormDescription>
+                            상위 TF가 반대 추세이면 AI 호출 없이 진입을 차단합니다.
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="useFundingRate"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">선물 펀딩비 / 미결제약정 사용</FormLabel>
+                          <FormDescription>
+                            펀딩비와 OI 데이터를 AI 프롬프트에 포함해 시장 포지셔닝을 반영합니다.
                           </FormDescription>
                         </div>
                         <FormControl>

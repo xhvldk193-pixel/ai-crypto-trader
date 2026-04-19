@@ -57,6 +57,15 @@ router.put("/config", async (req, res) => {
     if (body.autoTrade !== undefined) updateData.autoTrade = body.autoTrade;
     if (body.useAiTargets !== undefined) updateData.useAiTargets = body.useAiTargets;
     if (body.checkIntervalSeconds !== undefined) updateData.checkIntervalSeconds = body.checkIntervalSeconds;
+    if (body.maxDailyLossPercent !== undefined) updateData.maxDailyLossPercent = body.maxDailyLossPercent;
+    if (body.useMtfFilter !== undefined) updateData.useMtfFilter = body.useMtfFilter;
+    if (body.strictMtf !== undefined) updateData.strictMtf = body.strictMtf;
+    if (body.mtfTimeframes !== undefined && Array.isArray(body.mtfTimeframes)) {
+      const cleaned = (body.mtfTimeframes as unknown[])
+        .filter((t): t is string => typeof t === "string" && t.length > 0);
+      updateData.mtfTimeframes = Array.from(new Set(cleaned));
+    }
+    if (body.useFundingRate !== undefined) updateData.useFundingRate = body.useFundingRate;
     updateData.updatedAt = new Date();
 
     let updated;
@@ -113,6 +122,11 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     autoTrade: row.autoTrade,
     useAiTargets: row.useAiTargets,
     checkIntervalSeconds: row.checkIntervalSeconds,
+    maxDailyLossPercent: row.maxDailyLossPercent,
+    useMtfFilter: row.useMtfFilter,
+    strictMtf: row.strictMtf,
+    mtfTimeframes: (row.mtfTimeframes as string[]) ?? ["1h", "4h"],
+    useFundingRate: row.useFundingRate,
   };
 }
 

@@ -1,11 +1,38 @@
 import { Router } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { db, aiSignalsTable, botConfigTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { exchangeService } from "../lib/exchange";
 import { computeAtrPercent } from "../lib/indicators";
+import { analyzeDivergences } from "../lib/divergence";
 
 const router = Router();
+
+const ANTHROPIC_MODEL = "claude-opus-4-7";
+
+function extractJson(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) return fenced[1].trim();
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first >= 0 && last > first) return text.slice(first, last + 1);
+  return text.trim();
+}
+
+async function getMtfBias(symbol: string, timeframes: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  await Promise.all(timeframes.map(async (tf) => {
+    try {
+      const candles = await exchangeService.getOhlcv(symbol, tf, 200);
+      if (candles.length < 50) { out[tf] = "neutral"; return; }
+      const div = analyzeDivergences(candles, symbol, tf);
+      out[tf] = div.overallBias;
+    } catch {
+      out[tf] = "neutral";
+    }
+  }));
+  return out;
+}
 
 router.post("/signal", async (req, res) => {
   const { symbol, timeframe, divergenceData, currentPrice, change24h } = req.body;
@@ -14,7 +41,6 @@ router.post("/signal", async (req, res) => {
   }
 
   try {
-    // Pull recent candles to compute ATR-based volatility for the AI prompt
     let atrPercent: number | null = null;
     try {
       const candles = await exchangeService.getOhlcv(symbol, timeframe || "15m", 100);
@@ -23,11 +49,33 @@ router.post("/signal", async (req, res) => {
       req.log.warn({ err }, "Failed to compute ATR for AI signal");
     }
 
+    // MTF + funding rate context (best-effort)
+    const cfgRows = await db.select().from(botConfigTable).limit(1);
+    const cfg = cfgRows[0];
+    const mtfTfs = cfg?.useMtfFilter
+      ? ((cfg.mtfTimeframes as string[]) ?? ["1h", "4h"])
+      : [];
+    const [mtf, fundingRate, openInterest] = await Promise.all([
+      mtfTfs.length > 0 ? getMtfBias(symbol, mtfTfs) : Promise.resolve({} as Record<string, string>),
+      cfg?.useFundingRate !== false ? exchangeService.getFundingRate(symbol) : Promise.resolve(null),
+      cfg?.useFundingRate !== false ? exchangeService.getOpenInterest(symbol) : Promise.resolve(null),
+    ]);
+
     const signals = (divergenceData?.signals ?? []) as Array<{
       indicator: string; type: string; strength: number; description: string;
     }>;
     const avgBullishStrength = avgStrength(signals.filter(s => s.type.startsWith("positive")));
     const avgBearishStrength = avgStrength(signals.filter(s => s.type.startsWith("negative")));
+
+    const mtfText = Object.keys(mtf).length > 0
+      ? Object.entries(mtf).map(([tf, b]) => `  - ${tf}: ${b}`).join("\n")
+      : "  (disabled)";
+    const fundingText = fundingRate !== null
+      ? `Funding rate: ${(fundingRate * 100).toFixed(4)}%`
+      : "Funding rate: unavailable";
+    const oiText = openInterest !== null
+      ? `Open interest: ${openInterest.toLocaleString()} contracts`
+      : "Open interest: unavailable";
 
     const systemPrompt = `You are an expert crypto trading assistant specialized in divergence-based scalping on the ${timeframe || "15m"} timeframe.
 You analyze divergence signals from indicators (MACD, RSI, Stochastic, CCI, Momentum, OBV, VWMACD, CMF, MFI) to determine trades.
@@ -39,19 +87,20 @@ Divergence types:
 
 Your job:
 1. Decide BUY / SELL / HOLD based on overall divergence bias and strength.
-2. Predict an expected price-move magnitude over the next ~10–20 candles of the given timeframe. Use the divergence strength (more & stronger confirming indicators → larger move) and recent ATR volatility as a sanity bound. Typical 15m moves: 0.3%–2.5%; strong setups can reach 3–5%.
-3. From the predicted move, set:
-   - suggestedEntryPrice: usually the current price (slight pullback for BUY, slight bounce for SELL is fine)
+2. Respect the multi-timeframe (MTF) bias on higher timeframes — if higher TFs strongly disagree with the primary signal, prefer HOLD or reduce confidence.
+3. Use funding rate as a contrarian sentiment cue (very positive funding → crowded longs, slight bearish bias; very negative → crowded shorts, slight bullish bias).
+4. Predict an expected price-move magnitude over the next ~10–20 candles. Use divergence strength + recent ATR as a sanity bound. Typical 15m moves: 0.3%–2.5%; strong setups 3–5%.
+5. From the predicted move, set:
+   - suggestedEntryPrice: usually the current price
    - suggestedTakeProfit: entry ± expected move (BUY: +, SELL: -)
    - suggestedStopLoss: opposite side, sized smaller than TP to keep R/R ≥ 1.3 (typically 0.4–0.7× of expected move)
-4. Confidence reflects how aligned and strong the signals are.
-5. expectedMovePercent must be SIGNED: positive for BUY (price rises), negative for SELL (price falls), 0 for HOLD.
+6. expectedMovePercent must be SIGNED: positive for BUY, negative for SELL, 0 for HOLD.
 
-Respond ONLY with valid JSON matching this exact schema:
+Respond ONLY with valid JSON (no prose, no markdown fences) matching this exact schema:
 {
   "action": "BUY" | "SELL" | "HOLD",
   "confidence": number (0.0-1.0),
-  "reasoning": string (Korean, 2-3 sentences explaining the signal, the predicted move, and the chosen TP/SL),
+  "reasoning": string (Korean, 2-3 sentences explaining the signal, MTF/funding context, predicted move, and chosen TP/SL),
   "riskLevel": "low" | "medium" | "high",
   "expectedMovePercent": number,
   "suggestedEntryPrice": number,
@@ -64,28 +113,32 @@ Current Price: $${currentPrice}
 24h Change: ${change24h !== undefined ? `${change24h > 0 ? "+" : ""}${Number(change24h).toFixed(2)}%` : "N/A"}
 Recent ATR (volatility): ${atrPercent !== null ? `${atrPercent.toFixed(2)}% of price` : "unknown"}
 
-Divergence Analysis:
+Divergence Analysis (primary TF):
 ${divergenceData ? `- Overall Bias: ${divergenceData.overallBias}
 - Bullish Signals: ${divergenceData.bullishCount} (avg strength ${avgBullishStrength.toFixed(2)})
 - Bearish Signals: ${divergenceData.bearishCount} (avg strength ${avgBearishStrength.toFixed(2)})
 - Active Signals: ${signals.map(s => `${s.indicator}/${s.type}@${s.strength.toFixed(2)}`).join(", ") || "none"}` : "No divergence data."}
 
+Multi-Timeframe Bias:
+${mtfText}
+
+Futures context:
+${fundingText}
+${oiText}
+
 Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-5.2",
-      max_completion_tokens: 700,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage }
-      ],
-      response_format: { type: "json_object" }
+    const message = await anthropic.messages.create({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
     });
-
-    const content = completion.choices[0]?.message?.content;
+    const block = message.content[0];
+    const content = block && block.type === "text" ? block.text : "";
     if (!content) throw new Error("Empty response from AI");
 
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(extractJson(content));
     const rawAction = String(parsed.action ?? "HOLD").toUpperCase();
     const action: "BUY" | "SELL" | "HOLD" =
       rawAction === "BUY" || rawAction === "SELL" ? rawAction : "HOLD";
@@ -96,7 +149,6 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 
     let takeProfit = Number(parsed.suggestedTakeProfit);
     let stopLoss = Number(parsed.suggestedStopLoss);
-    // Sanity defaults if AI omits TP/SL
     if (action !== "HOLD" && (!Number.isFinite(takeProfit) || !Number.isFinite(stopLoss))) {
       const moveAbs = Math.abs(expectedMovePercent) / 100 || (atrPercent ?? 1) / 100;
       const dir = action === "BUY" ? 1 : -1;

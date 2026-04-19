@@ -850,7 +850,13 @@ components:
           type: integer
         executedTrades:
           type: integer
-      required: [running, totalSignals, executedTrades]
+        dailyPnlUsd:
+          type: number
+        dailyPnlPercent:
+          type: number
+        halted:
+          type: boolean
+      required: [running, totalSignals, executedTrades, dailyPnlUsd, dailyPnlPercent, halted]
 
     BotConfig:
       type: object
@@ -883,7 +889,19 @@ components:
           type: boolean
         checkIntervalSeconds:
           type: integer
-      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds]
+        maxDailyLossPercent:
+          type: number
+        useMtfFilter:
+          type: boolean
+        strictMtf:
+          type: boolean
+        mtfTimeframes:
+          type: array
+          items:
+            type: string
+        useFundingRate:
+          type: boolean
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate]
 
     BotConfigUpdate:
       type: object
@@ -916,6 +934,18 @@ components:
           type: boolean
         checkIntervalSeconds:
           type: integer
+        maxDailyLossPercent:
+          type: number
+        useMtfFilter:
+          type: boolean
+        strictMtf:
+          type: boolean
+        mtfTimeframes:
+          type: array
+          items:
+            type: string
+        useFundingRate:
+          type: boolean
 
     BotLog:
       type: object
