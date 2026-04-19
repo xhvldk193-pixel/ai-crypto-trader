@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useGetMarketTicker, useGetPortfolioSummary, useGetBotStatus, useGetBotLogs, useGetLatestAiSignalsBySymbol, useGetActivePositions } from "@workspace/api-client-react";
+import { useGetMarketTicker, useGetPortfolioSummary, useGetBotStatus, useGetBotLogs, useGetLatestAiSignalsBySymbol, useGetActivePositions, useGetPnlTimeseries } from "@workspace/api-client-react";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,26 @@ export default function Dashboard() {
   const { data: logs, isLoading: isLogsLoading } = useGetBotLogs({ limit: 5 }, { query: { refetchInterval: 5000 } as never });
   const { data: signalsData } = useGetLatestAiSignalsBySymbol({ query: { refetchInterval: 5000 } as never });
   const { data: activeData } = useGetActivePositions({ query: { refetchInterval: 5000 } as never });
+  const { data: pnlData } = useGetPnlTimeseries({ days: 30 }, { query: { refetchInterval: 30000 } as never });
+
+  const cumulativeChart = useMemo(
+    () => (pnlData?.cumulative ?? []).map((p) => ({
+      ts: p.timestamp,
+      label: new Date(p.timestamp).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }),
+      cum: Number(p.cumulativePnl.toFixed(2)),
+    })),
+    [pnlData]
+  );
+  const dailyChart = useMemo(
+    () => (pnlData?.daily ?? []).map((d) => ({
+      ts: d.timestamp,
+      label: new Date(d.timestamp).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }),
+      pnl: Number(d.pnl.toFixed(2)),
+      winRate: Number((d.winRate * 100).toFixed(1)),
+      trades: d.trades,
+    })),
+    [pnlData]
+  );
   const signals = useMemo(
     () => [...(signalsData?.signals ?? [])].sort((a, b) => (a.symbol ?? "").localeCompare(b.symbol ?? "")),
     [signalsData]
@@ -136,6 +157,57 @@ export default function Dashboard() {
                   {s.reasoning && <div className="pt-1 border-t text-xs text-muted-foreground leading-relaxed line-clamp-3">{s.reasoning}</div>}
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" /> PnL 추이 (최근 30일)</CardTitle>
+          <CardDescription>실현 손익 누적 곡선과 일별 승률</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {cumulativeChart.length === 0 ? (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              아직 실현된 거래 내역이 없습니다.
+            </div>
+          ) : (
+            <div className="grid gap-6 md:grid-cols-2">
+              <div>
+                <div className="text-xs text-muted-foreground mb-2">누적 PnL ($)</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={cumulativeChart} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 12 }}
+                      formatter={(v: number) => [`$${v.toFixed(2)}`, "누적 PnL"]}
+                    />
+                    <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="cum" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-2">일별 승률 (%) · 일별 PnL ($)</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={dailyChart} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} domain={[0, 100]} />
+                    <Tooltip
+                      contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 12 }}
+                      formatter={(v: number, name: string) => name === "winRate" ? [`${v.toFixed(1)}%`, "승률"] : [`$${v.toFixed(2)}`, "PnL"]}
+                    />
+                    <ReferenceLine yAxisId="left" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+                    <Bar yAxisId="left" dataKey="pnl" fill="hsl(var(--primary))" />
+                    <Line yAxisId="right" type="monotone" dataKey="winRate" stroke="hsl(var(--positive, 142 76% 36%))" strokeWidth={2} dot={{ r: 3 }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           )}
         </CardContent>

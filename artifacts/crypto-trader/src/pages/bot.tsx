@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useGetBotStatus, useGetBotConfig, useUpdateBotConfig, useStartBot, useStopBot, useGetBotLogs, useGetMarketSymbols, useGetBotReflections } from "@workspace/api-client-react";
+import { useGetBotStatus, useGetBotConfig, useUpdateBotConfig, useStartBot, useStopBot, useGetBotLogs, useGetMarketSymbols, useGetBotReflections, useSyncPositions } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Power, PowerOff, Activity, RefreshCw, Save } from "lucide-react";
+import { Power, PowerOff, Activity, RefreshCw, Save, RotateCw } from "lucide-react";
 import { formatDate } from "@/lib/format";
 
 const overrideField = z
@@ -45,6 +45,14 @@ const botConfigSchema = z.object({
   mtfTimeframes: z.array(z.string().min(1)),
   useFundingRate: z.boolean(),
   symbolOverrides: z.record(z.string(), symbolOverrideSchema).default({}),
+  leverage: z.coerce.number().int().min(1).max(125),
+  marginType: z.enum(["ISOLATED", "CROSSED"]),
+  notifyOnError: z.boolean(),
+  useTrailingStop: z.boolean(),
+  trailingActivatePercent: z.coerce.number().min(0.1).max(50),
+  trailingDistancePercent: z.coerce.number().min(0.1).max(50),
+  usePartialTp: z.boolean(),
+  partialTpPercent: z.coerce.number().min(10).max(90),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -64,6 +72,22 @@ export default function BotControl() {
   const updateConfig = useUpdateBotConfig();
   const startBotMutation = useStartBot();
   const stopBotMutation = useStopBot();
+  const syncPositionsMutation = useSyncPositions();
+
+  const handleSyncPositions = () => {
+    syncPositionsMutation.mutate(undefined, {
+      onSuccess: (res) => {
+        const r = res as unknown as { added: number; removed: number; details: string[] };
+        toast({
+          title: "동기화 완료",
+          description: `추가 ${r.added}건 / 정리 ${r.removed}건${r.details.length ? "\n" + r.details.slice(0, 5).join("\n") : ""}`,
+        });
+      },
+      onError: (err: unknown) => {
+        toast({ title: "동기화 실패", description: err instanceof Error ? err.message : "오류", variant: "destructive" });
+      },
+    });
+  };
 
   const form = useForm<BotConfigFormValues>({
     resolver: zodResolver(botConfigSchema),
@@ -84,10 +108,20 @@ export default function BotControl() {
       mtfTimeframes: ["1h", "4h"],
       useFundingRate: true,
       symbolOverrides: {},
+      leverage: 10,
+      marginType: "ISOLATED",
+      notifyOnError: true,
+      useTrailingStop: false,
+      trailingActivatePercent: 1.0,
+      trailingDistancePercent: 0.5,
+      usePartialTp: false,
+      partialTpPercent: 50,
     },
   });
 
   const useAiTargetsValue = form.watch("useAiTargets");
+  const useTrailingValue = form.watch("useTrailingStop");
+  const usePartialValue = form.watch("usePartialTp");
 
   useEffect(() => {
     if (config) {
@@ -109,6 +143,14 @@ export default function BotControl() {
         mtfTimeframes: config.mtfTimeframes && config.mtfTimeframes.length > 0 ? config.mtfTimeframes : ["1h", "4h"],
         useFundingRate: config.useFundingRate ?? true,
         symbolOverrides: (config.symbolOverrides as Record<string, { tradeAmount?: number | null; minConfidence?: number | null; takeProfitPercent?: number | null; stopLossPercent?: number | null }>) ?? {},
+        leverage: config.leverage ?? 10,
+        marginType: (config.marginType as "ISOLATED" | "CROSSED") ?? "ISOLATED",
+        notifyOnError: config.notifyOnError ?? true,
+        useTrailingStop: config.useTrailingStop ?? false,
+        trailingActivatePercent: config.trailingActivatePercent ?? 1.0,
+        trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
+        usePartialTp: config.usePartialTp ?? false,
+        partialTpPercent: config.partialTpPercent ?? 50,
       });
     }
   }, [config, form]);
@@ -169,8 +211,19 @@ export default function BotControl() {
             {status?.running ? <Activity className="h-5 w-5 animate-pulse" /> : <PowerOff className="h-5 w-5" />}
             <span className="font-bold tracking-widest">{status?.running ? '실행 중' : '대기 중'}</span>
           </div>
-          
-          <Button 
+
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={handleSyncPositions}
+            disabled={syncPositionsMutation.isPending}
+            title="거래소 실제 포지션과 DB를 동기화"
+          >
+            <RotateCw className={`mr-2 h-4 w-4 ${syncPositionsMutation.isPending ? "animate-spin" : ""}`} />
+            포지션 동기화
+          </Button>
+
+          <Button
             size="lg"
             variant={status?.running ? "destructive" : "default"}
             onClick={handleToggleBot}
@@ -549,6 +602,151 @@ export default function BotControl() {
                       );
                     }}
                   />
+
+                  <div className="rounded-lg border p-4 shadow-sm space-y-3">
+                    <div className="text-sm font-semibold">선물 거래 설정</div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <FormField
+                        control={form.control}
+                        name="leverage"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>레버리지 (x)</FormLabel>
+                            <FormControl>
+                              <Input type="number" min={1} max={125} {...field} />
+                            </FormControl>
+                            <FormDescription className="text-xs">1–125배 (현재 기본 10x)</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="marginType"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>마진 모드</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="ISOLATED">격리 (ISOLATED)</SelectItem>
+                                <SelectItem value="CROSSED">교차 (CROSSED)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription className="text-xs">격리: 포지션별 마진 분리 (권장)</FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="notifyOnError"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">텔레그램 오류 알림</FormLabel>
+                          <FormDescription>
+                            진입/청산/부분익절 실패 또는 봇 틱 오류를 텔레그램으로 즉시 알립니다 (5분 내 동일 오류 중복 차단).
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <div className="rounded-lg border p-4 shadow-sm space-y-3">
+                    <FormField
+                      control={form.control}
+                      name="useTrailingStop"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">트레일링 스톱</FormLabel>
+                            <FormDescription>
+                              진입 후 일정 이익 도달 시 손절선이 가격을 따라 끌어올려져 수익을 보호합니다.
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    {useTrailingValue && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="trailingActivatePercent"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">활성화 임계값 (%)</FormLabel>
+                              <FormControl>
+                                <Input type="number" step="0.1" {...field} />
+                              </FormControl>
+                              <FormDescription className="text-xs">진입가 대비 이익 % (예: 1 = 1% 수익 시 활성)</FormDescription>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="trailingDistancePercent"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">트레일링 거리 (%)</FormLabel>
+                              <FormControl>
+                                <Input type="number" step="0.1" {...field} />
+                              </FormControl>
+                              <FormDescription className="text-xs">최고가에서 후행할 거리 % (예: 0.5)</FormDescription>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border p-4 shadow-sm space-y-3">
+                    <FormField
+                      control={form.control}
+                      name="usePartialTp"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">부분 익절</FormLabel>
+                            <FormDescription>
+                              가격이 TP 절반 지점에 도달하면 일부 수량을 청산하고 SL을 본전으로 이동합니다.
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    {usePartialValue && (
+                      <FormField
+                        control={form.control}
+                        name="partialTpPercent"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">청산 비율 (%)</FormLabel>
+                            <FormControl>
+                              <Input type="number" step="5" {...field} />
+                            </FormControl>
+                            <FormDescription className="text-xs">중간 도달 시 청산할 비율 (10–90%, 기본 50%)</FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
 
                   <FormField
                     control={form.control}
