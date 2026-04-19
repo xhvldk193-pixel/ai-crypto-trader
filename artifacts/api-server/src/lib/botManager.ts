@@ -234,12 +234,10 @@ class BotManager {
       this.currentTimeframe = config.timeframe;
       this.lastCheckedAt = Date.now();
 
-      // Periodic auto-reconcile (prune phantoms / surface untracked exchange positions)
+      // Auto-reconcile every tick (prune phantoms / surface untracked exchange positions)
       this.tickCount += 1;
-      if (this.tickCount % 10 === 1) {
-        try { await this.syncWithExchange("auto"); }
-        catch (err) { logger.warn({ err }, "Periodic auto-sync failed"); }
-      }
+      try { await this.syncWithExchange("auto"); }
+      catch (err) { logger.warn({ err }, "Auto-sync failed"); }
 
       // Update daily PnL & halt state from realized trades
       await this.refreshDailyPnl(config);
@@ -541,7 +539,9 @@ class BotManager {
           positionInserted = true;
         });
       } catch (err) {
-        await this.addLog("error", `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`, symbol);
+        const errMsg = `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`;
+        await this.addLog("error", errMsg, symbol);
+        await this.maybeNotify("error", `❌ ${errMsg}`, `pos-register-fail-${symbol}`);
         return;
       }
 
@@ -697,11 +697,11 @@ class BotManager {
         }
       }
 
-      // ─── Partial TP: close half (or configured %) once price moves halfway to TP ──
+      // ─── Partial TP: at first TP hit, close configured % and move SL to breakeven ──
+      // (when partial TP is enabled, the full-close TP path below is skipped for the first hit)
       if (config.usePartialTp && !pos.partialTpDone) {
-        const halfTarget = pos.entryPrice + (pos.takeProfit - pos.entryPrice) * 0.5;
-        const halfHit = isLong ? price >= halfTarget : price <= halfTarget;
-        if (halfHit) {
+        const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
+        if (tpHit) {
           try {
             const positionSide = isLong ? "LONG" : "SHORT";
             let actualQty = pos.quantity;
@@ -751,7 +751,9 @@ class BotManager {
         }
       }
 
-      const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
+      // Once partial TP has fired, ignore further TP hits — let SL (now at breakeven) or trailing close the remainder
+      const tpHit = (isLong ? price >= pos.takeProfit : price <= pos.takeProfit)
+        && !(config.usePartialTp && pos.partialTpDone);
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
 
       if (!tpHit && !slHit) return;

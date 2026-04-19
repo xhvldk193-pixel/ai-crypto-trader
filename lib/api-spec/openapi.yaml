@@ -1043,13 +1043,39 @@ components:
                 type: number
               trades:
                 type: integer
+              wins:
+                type: integer
+              losses:
+                type: integer
               winRate:
                 type: number
-            required: [timestamp, pnl, trades, winRate]
+            required: [timestamp, pnl, trades, wins, losses, winRate]
+        weekly:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: number
+              pnl:
+                type: number
+              trades:
+                type: integer
+              wins:
+                type: integer
+              losses:
+                type: integer
+              winRate:
+                type: number
+            required: [timestamp, pnl, trades, wins, losses, winRate]
         kpis:
           type: object
           properties:
             totalTrades:
+              type: integer
+            totalWins:
+              type: integer
+            totalLosses:
               type: integer
             winRate:
               type: number
@@ -1067,8 +1093,8 @@ components:
             worstDayTimestamp:
               type: number
               nullable: true
-          required: [totalTrades, winRate, avgRiskReward, totalPnl, bestDayPnl, worstDayPnl]
-      required: [cumulative, daily, kpis]
+          required: [totalTrades, totalWins, totalLosses, winRate, avgRiskReward, totalPnl, bestDayPnl, worstDayPnl]
+      required: [cumulative, daily, weekly, kpis]
 
     SyncPositionsResult:
       type: object

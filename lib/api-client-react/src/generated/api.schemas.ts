@@ -302,11 +302,24 @@ export type PnlTimeseriesDailyItem = {
   timestamp: number;
   pnl: number;
   trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+};
+
+export type PnlTimeseriesWeeklyItem = {
+  timestamp: number;
+  pnl: number;
+  trades: number;
+  wins: number;
+  losses: number;
   winRate: number;
 };
 
 export type PnlTimeseriesKpis = {
   totalTrades: number;
+  totalWins: number;
+  totalLosses: number;
   winRate: number;
   avgRiskReward: number;
   totalPnl: number;
@@ -319,6 +332,7 @@ export type PnlTimeseriesKpis = {
 export interface PnlTimeseries {
   cumulative: PnlTimeseriesCumulativeItem[];
   daily: PnlTimeseriesDailyItem[];
+  weekly: PnlTimeseriesWeeklyItem[];
   kpis: PnlTimeseriesKpis;
 }
 

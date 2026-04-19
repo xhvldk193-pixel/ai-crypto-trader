@@ -33,6 +33,8 @@ export default function Dashboard() {
       ts: d.timestamp,
       label: new Date(d.timestamp).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }),
       pnl: Number(d.pnl.toFixed(2)),
+      wins: d.wins,
+      losses: d.losses,
       winRate: Number((d.winRate * 100).toFixed(1)),
       trades: d.trades,
     })),
@@ -220,7 +222,7 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-2">일별 승률 (%) · 일별 PnL ($)</div>
+                <div className="text-xs text-muted-foreground mb-2">일별 승/패 횟수 · 승률 (%)</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={dailyChart} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
@@ -232,8 +234,9 @@ export default function Dashboard() {
                       formatter={(v: number, name: string) => name === "winRate" ? [`${v.toFixed(1)}%`, "승률"] : [`$${v.toFixed(2)}`, "PnL"]}
                     />
                     <ReferenceLine yAxisId="left" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-                    <Bar yAxisId="left" dataKey="pnl" fill="hsl(var(--primary))" />
-                    <Line yAxisId="right" type="monotone" dataKey="winRate" stroke="hsl(var(--positive, 142 76% 36%))" strokeWidth={2} dot={{ r: 3 }} />
+                    <Bar yAxisId="left" dataKey="wins" name="승" stackId="a" fill="hsl(var(--positive, 142 76% 36%))" />
+                    <Bar yAxisId="left" dataKey="losses" name="패" stackId="a" fill="hsl(var(--destructive, 0 84% 60%))" />
+                    <Line yAxisId="right" type="monotone" dataKey="winRate" name="승률(%)" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 3 }} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

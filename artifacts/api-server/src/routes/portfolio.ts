@@ -102,16 +102,17 @@ router.get("/pnl-timeseries", async (req, res) => {
       return { timestamp: t.createdAt.getTime(), cumulativePnl: cum, tradePnl: t.pnl ?? 0 };
     });
 
-    // Daily aggregation: pnl, wins, total trades → win rate
-    const dayMap = new Map<string, { pnl: number; wins: number; total: number; ts: number }>();
+    // Daily aggregation: pnl, wins, losses, total trades → win rate
+    const dayMap = new Map<string, { pnl: number; wins: number; losses: number; total: number; ts: number }>();
     for (const t of filtered) {
       const d = new Date(t.createdAt);
       const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
       const ts = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-      const cur = dayMap.get(key) ?? { pnl: 0, wins: 0, total: 0, ts };
+      const cur = dayMap.get(key) ?? { pnl: 0, wins: 0, losses: 0, total: 0, ts };
       cur.pnl += t.pnl ?? 0;
       cur.total += 1;
       if ((t.pnl ?? 0) > 0) cur.wins += 1;
+      else if ((t.pnl ?? 0) < 0) cur.losses += 1;
       dayMap.set(key, cur);
     }
     const daily = Array.from(dayMap.values())
@@ -120,7 +121,34 @@ router.get("/pnl-timeseries", async (req, res) => {
         timestamp: d.ts,
         pnl: d.pnl,
         trades: d.total,
+        wins: d.wins,
+        losses: d.losses,
         winRate: d.total > 0 ? d.wins / d.total : 0,
+      }));
+
+    // Weekly aggregation: ISO week starting Monday (UTC)
+    const weekMap = new Map<string, { pnl: number; wins: number; losses: number; total: number; ts: number }>();
+    for (const t of filtered) {
+      const d = new Date(t.createdAt);
+      const dow = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+      const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow);
+      const key = String(monday);
+      const cur = weekMap.get(key) ?? { pnl: 0, wins: 0, losses: 0, total: 0, ts: monday };
+      cur.pnl += t.pnl ?? 0;
+      cur.total += 1;
+      if ((t.pnl ?? 0) > 0) cur.wins += 1;
+      else if ((t.pnl ?? 0) < 0) cur.losses += 1;
+      weekMap.set(key, cur);
+    }
+    const weekly = Array.from(weekMap.values())
+      .sort((a, b) => a.ts - b.ts)
+      .map((w) => ({
+        timestamp: w.ts,
+        pnl: w.pnl,
+        trades: w.total,
+        wins: w.wins,
+        losses: w.losses,
+        winRate: w.total > 0 ? w.wins / w.total : 0,
       }));
 
     // Aggregate KPIs across the requested window
@@ -138,7 +166,10 @@ router.get("/pnl-timeseries", async (req, res) => {
     res.json({
       cumulative,
       daily,
+      weekly,
       kpis: {
+        totalWins: wins.length,
+        totalLosses: losses.length,
         totalTrades: filtered.length,
         winRate,
         avgRiskReward,
