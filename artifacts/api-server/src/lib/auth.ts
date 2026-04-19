@@ -41,7 +41,32 @@ declare module "express-session" {
   interface SessionData {
     authed?: boolean;
     loggedInAt?: number;
+    pending2fa?: {
+      codeHash: string;
+      expiresAt: number;
+      attempts: number;
+    };
   }
+}
+
+export const TWO_FA_CODE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export const TWO_FA_MAX_ATTEMPTS = 5;
+
+export function generate2faCode(): string {
+  // 6-digit code, zero-padded. crypto.randomInt is unbiased.
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
+export function hash2faCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+export function verify2faCode(submitted: string, expectedHash: string): boolean {
+  if (!/^\d{6}$/.test(submitted)) return false;
+  const a = Buffer.from(hash2faCode(submitted), "hex");
+  const b = Buffer.from(expectedHash, "hex");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 export const sessionMiddleware: RequestHandler = session({

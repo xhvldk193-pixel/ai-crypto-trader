@@ -16,6 +16,32 @@ export const LoginBody = zod.object({
 
 export const LoginResponse = zod.object({
   authed: zod.boolean(),
+  needs2fa: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when a Telegram verification code has been sent and is still pending",
+    ),
+  loggedInAt: zod.number().nullish(),
+});
+
+/**
+ * @summary Verify the 6-digit code sent via Telegram to complete login
+ */
+export const verifyTwoFactorBodyCodeRegExp = new RegExp("^[0-9]{6}$");
+
+export const VerifyTwoFactorBody = zod.object({
+  code: zod.string().regex(verifyTwoFactorBodyCodeRegExp),
+});
+
+export const VerifyTwoFactorResponse = zod.object({
+  authed: zod.boolean(),
+  needs2fa: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when a Telegram verification code has been sent and is still pending",
+    ),
   loggedInAt: zod.number().nullish(),
 });
 
@@ -24,6 +50,12 @@ export const LoginResponse = zod.object({
  */
 export const LogoutResponse = zod.object({
   authed: zod.boolean(),
+  needs2fa: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when a Telegram verification code has been sent and is still pending",
+    ),
   loggedInAt: zod.number().nullish(),
 });
 
@@ -32,6 +64,12 @@ export const LogoutResponse = zod.object({
  */
 export const GetAuthStatusResponse = zod.object({
   authed: zod.boolean(),
+  needs2fa: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when a Telegram verification code has been sent and is still pending",
+    ),
   loggedInAt: zod.number().nullish(),
 });
 

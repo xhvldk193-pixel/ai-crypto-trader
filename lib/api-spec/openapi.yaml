@@ -59,6 +59,43 @@ paths:
                   authed:
                     type: boolean
 
+  /auth/verify-2fa:
+    post:
+      operationId: verifyTwoFactor
+      tags: [auth]
+      summary: Verify the 6-digit code sent via Telegram to complete login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+              required: [code]
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+        "401":
+          description: Invalid code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  authed:
+                    type: boolean
+                  attemptsRemaining:
+                    type: integer
+
   /auth/logout:
     post:
       operationId: logout
@@ -1061,6 +1098,9 @@ components:
       properties:
         authed:
           type: boolean
+        needs2fa:
+          type: boolean
+          description: True when a Telegram verification code has been sent and is still pending
         loggedInAt:
           type: number
           nullable: true

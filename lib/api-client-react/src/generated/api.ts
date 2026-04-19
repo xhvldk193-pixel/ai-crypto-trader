@@ -53,6 +53,8 @@ import type {
   PortfolioBalance,
   PortfolioSummary,
   Ticker,
+  VerifyTwoFactor401,
+  VerifyTwoFactorBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -148,6 +150,92 @@ export const useLogin = <
   TContext
 > => {
   return useMutation(getLoginMutationOptions(options));
+};
+
+/**
+ * @summary Verify the 6-digit code sent via Telegram to complete login
+ */
+export const getVerifyTwoFactorUrl = () => {
+  return `/api/auth/verify-2fa`;
+};
+
+export const verifyTwoFactor = async (
+  verifyTwoFactorBody: VerifyTwoFactorBody,
+  options?: RequestInit,
+): Promise<AuthStatus> => {
+  return customFetch<AuthStatus>(getVerifyTwoFactorUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(verifyTwoFactorBody),
+  });
+};
+
+export const getVerifyTwoFactorMutationOptions = <
+  TError = ErrorType<VerifyTwoFactor401>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyTwoFactor>>,
+    TError,
+    { data: BodyType<VerifyTwoFactorBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyTwoFactor>>,
+  TError,
+  { data: BodyType<VerifyTwoFactorBody> },
+  TContext
+> => {
+  const mutationKey = ["verifyTwoFactor"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyTwoFactor>>,
+    { data: BodyType<VerifyTwoFactorBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return verifyTwoFactor(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VerifyTwoFactorMutationResult = NonNullable<
+  Awaited<ReturnType<typeof verifyTwoFactor>>
+>;
+export type VerifyTwoFactorMutationBody = BodyType<VerifyTwoFactorBody>;
+export type VerifyTwoFactorMutationError = ErrorType<VerifyTwoFactor401>;
+
+/**
+ * @summary Verify the 6-digit code sent via Telegram to complete login
+ */
+export const useVerifyTwoFactor = <
+  TError = ErrorType<VerifyTwoFactor401>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof verifyTwoFactor>>,
+    TError,
+    { data: BodyType<VerifyTwoFactorBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof verifyTwoFactor>>,
+  TError,
+  { data: BodyType<VerifyTwoFactorBody> },
+  TContext
+> => {
+  return useMutation(getVerifyTwoFactorMutationOptions(options));
 };
 
 /**

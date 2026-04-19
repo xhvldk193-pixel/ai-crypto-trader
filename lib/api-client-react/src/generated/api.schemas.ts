@@ -358,6 +358,8 @@ export interface BotConfigUpdate {
 
 export interface AuthStatus {
   authed: boolean;
+  /** True when a Telegram verification code has been sent and is still pending */
+  needs2fa?: boolean;
   loggedInAt?: number | null;
 }
 
@@ -505,6 +507,17 @@ export type LoginBody = {
 export type Login401 = {
   error?: string;
   authed?: boolean;
+};
+
+export type VerifyTwoFactorBody = {
+  /** @pattern ^[0-9]{6}$ */
+  code: string;
+};
+
+export type VerifyTwoFactor401 = {
+  error?: string;
+  authed?: boolean;
+  attemptsRemaining?: number;
 };
 
 export type GetMarketSymbols200 = {
