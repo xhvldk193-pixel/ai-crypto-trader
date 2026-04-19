@@ -729,7 +729,7 @@ export default function BotControl() {
                           <div className="space-y-0.5">
                             <FormLabel className="text-base">부분 익절</FormLabel>
                             <FormDescription>
-                              가격이 TP 절반 지점에 도달하면 일부 수량을 청산하고 SL을 본전으로 이동합니다.
+                              가격이 1차 TP에 도달하면 일부 수량을 청산하고 SL을 본전으로 이동합니다. 잔여 수량은 2차 TP(원거리×2) 또는 SL에서 청산됩니다.
                             </FormDescription>
                           </div>
                           <FormControl>

@@ -231,7 +231,12 @@ export default function Dashboard() {
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10 }} domain={[0, 100]} />
                     <Tooltip
                       contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 12 }}
-                      formatter={(v: number, name: string) => name === "winRate" ? [`${v.toFixed(1)}%`, "승률"] : [`$${v.toFixed(2)}`, "PnL"]}
+                      formatter={(v: number, name: string) => {
+                        if (name === "승률(%)") return [`${v.toFixed(1)}%`, "승률"];
+                        if (name === "승") return [`${v}회`, "승"];
+                        if (name === "패") return [`${v}회`, "패"];
+                        return [String(v), name];
+                      }}
                     />
                     <ReferenceLine yAxisId="left" y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
                     <Bar yAxisId="left" dataKey="wins" name="승" stackId="a" fill="hsl(var(--positive, 142 76% 36%))" />

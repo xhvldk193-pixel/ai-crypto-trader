@@ -732,14 +732,19 @@ class BotManager {
                 triggeredBy: "bot",
               });
               // Move SL to breakeven (entry) and mark partial done
+              // Extend TP to 2x original distance so the remainder can be fully closed at a second TP
+              const origTpDistance = pos.takeProfit - pos.entryPrice;
+              const extendedTp = pos.entryPrice + origTpDistance * 2;
               await db.update(activePositionsTable).set({
                 quantity: actualQty - closeQty,
                 stopLoss: pos.entryPrice,
+                takeProfit: extendedTp,
                 partialTpDone: true,
               }).where(eq(activePositionsTable.id, pos.id));
               pos.stopLoss = pos.entryPrice;
+              pos.takeProfit = extendedTp;
               pos.quantity = actualQty - closeQty;
-              const successMsg = `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)})`;
+              const successMsg = `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)}) | 잔여 TP → $${extendedTp.toFixed(4)}`;
               await this.addLog("trade", successMsg, pos.symbol);
               await this.maybeNotify("info", `✅ ${successMsg}`, `partial-tp-ok-${pos.symbol}-${pos.id}`);
             }
@@ -751,9 +756,8 @@ class BotManager {
         }
       }
 
-      // Once partial TP has fired, ignore further TP hits — let SL (now at breakeven) or trailing close the remainder
-      const tpHit = (isLong ? price >= pos.takeProfit : price <= pos.takeProfit)
-        && !(config.usePartialTp && pos.partialTpDone);
+      // After partial TP, takeProfit was extended to 2x distance — second hit fully closes remainder
+      const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
 
       if (!tpHit && !slHit) return;
