@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "AI Crypto Trader"
+version = "1.0.0"
+id = "artifacts/crypto-trader"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24585
+
+[services.development]
+run = "pnpm --filter @workspace/crypto-trader run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/crypto-trader", "run", "build" ]
+publicDir = "artifacts/crypto-trader/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24585"
+BASE_PATH = "/"

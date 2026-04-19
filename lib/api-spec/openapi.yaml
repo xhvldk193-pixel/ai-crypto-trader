@@ -3,20 +3,31 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Crypto Trading Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: market
+    description: Market data from exchange
+  - name: divergence
+    description: Divergence analysis
+  - name: ai
+    description: AI trading signal analysis
+  - name: portfolio
+    description: Portfolio and account management
+  - name: trade
+    description: Order placement and management
+  - name: bot
+    description: Automated trading bot control
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +35,377 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /market/symbols:
+    get:
+      operationId: getMarketSymbols
+      tags: [market]
+      summary: Get available trading symbols
+      responses:
+        "200":
+          description: List of trading symbols
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  symbols:
+                    type: array
+                    items:
+                      type: string
+                required: [symbols]
+
+  /market/ticker:
+    get:
+      operationId: getMarketTicker
+      tags: [market]
+      summary: Get current ticker for a symbol
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current ticker data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticker"
+
+  /market/ohlcv:
+    get:
+      operationId: getMarketOhlcv
+      tags: [market]
+      summary: Get OHLCV candle data
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: timeframe
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1m","5m","15m","30m","1h","4h","1d"]
+            default: "1h"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 20
+            maximum: 500
+            default: 200
+      responses:
+        "200":
+          description: OHLCV candles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Candle"
+                required: [candles]
+
+  /divergence/analyze:
+    get:
+      operationId: analyzeDivergence
+      tags: [divergence]
+      summary: Analyze divergences for a symbol and timeframe
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: timeframe
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1m","5m","15m","30m","1h","4h","1d"]
+            default: "1h"
+      responses:
+        "200":
+          description: Divergence analysis result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DivergenceResult"
+
+  /ai/signal:
+    post:
+      operationId: getAiSignal
+      tags: [ai]
+      summary: Get AI analysis of current market signals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiSignalRequest"
+      responses:
+        "200":
+          description: AI trading signal analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSignalResponse"
+
+  /portfolio/balance:
+    get:
+      operationId: getPortfolioBalance
+      tags: [portfolio]
+      summary: Get account balance
+      responses:
+        "200":
+          description: Account balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioBalance"
+
+  /portfolio/positions:
+    get:
+      operationId: getPortfolioPositions
+      tags: [portfolio]
+      summary: Get open positions
+      responses:
+        "200":
+          description: Open positions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Position"
+                required: [positions]
+
+  /portfolio/history:
+    get:
+      operationId: getPortfolioHistory
+      tags: [portfolio]
+      summary: Get trade history
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Trade history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trades:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TradeRecord"
+                required: [trades]
+
+  /portfolio/summary:
+    get:
+      operationId: getPortfolioSummary
+      tags: [portfolio]
+      summary: Get portfolio summary with PnL
+      responses:
+        "200":
+          description: Portfolio summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioSummary"
+
+  /trade/order:
+    post:
+      operationId: placeOrder
+      tags: [trade]
+      summary: Place a buy or sell order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaceOrderRequest"
+      responses:
+        "200":
+          description: Order placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+
+  /trade/orders:
+    get:
+      operationId: getOpenOrders
+      tags: [trade]
+      summary: Get open orders
+      parameters:
+        - name: symbol
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Open orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+                required: [orders]
+
+  /trade/orders/{orderId}:
+    delete:
+      operationId: deleteOrder
+      tags: [trade]
+      summary: Cancel an open order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required: [success]
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get bot running status
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/start:
+    post:
+      operationId: startBot
+      tags: [bot]
+      summary: Start the trading bot
+      responses:
+        "200":
+          description: Bot started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/stop:
+    post:
+      operationId: stopBot
+      tags: [bot]
+      summary: Stop the trading bot
+      responses:
+        "200":
+          description: Bot stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/config:
+    get:
+      operationId: getBotConfig
+      tags: [bot]
+      summary: Get bot configuration
+      responses:
+        "200":
+          description: Bot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+    put:
+      operationId: updateBotConfig
+      tags: [bot]
+      summary: Update bot configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConfigUpdate"
+      responses:
+        "200":
+          description: Updated bot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConfig"
+
+  /bot/logs:
+    get:
+      operationId: getBotLogs
+      tags: [bot]
+      summary: Get recent bot activity logs
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        "200":
+          description: Bot activity logs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BotLog"
+                required: [logs]
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +413,348 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    Ticker:
+      type: object
+      properties:
+        symbol:
+          type: string
+        price:
+          type: number
+        change24h:
+          type: number
+        changePercent24h:
+          type: number
+        volume24h:
+          type: number
+        high24h:
+          type: number
+        low24h:
+          type: number
+        timestamp:
+          type: number
+      required: [symbol, price, change24h, changePercent24h, volume24h, high24h, low24h, timestamp]
+
+    Candle:
+      type: object
+      properties:
+        timestamp:
+          type: number
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: number
+      required: [timestamp, open, high, low, close, volume]
+
+    DivergenceSignal:
+      type: object
+      properties:
+        indicator:
+          type: string
+        type:
+          type: string
+          enum: ["positive_regular", "negative_regular", "positive_hidden", "negative_hidden"]
+        strength:
+          type: number
+        barIndex:
+          type: integer
+        description:
+          type: string
+      required: [indicator, type, strength, barIndex, description]
+
+    DivergenceResult:
+      type: object
+      properties:
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/DivergenceSignal"
+        bullishCount:
+          type: integer
+        bearishCount:
+          type: integer
+        overallBias:
+          type: string
+          enum: ["bullish", "bearish", "neutral"]
+        analyzedAt:
+          type: number
+      required: [symbol, timeframe, signals, bullishCount, bearishCount, overallBias, analyzedAt]
+
+    AiSignalRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        divergenceData:
+          $ref: "#/components/schemas/DivergenceResult"
+        currentPrice:
+          type: number
+        change24h:
+          type: number
+      required: [symbol, timeframe, currentPrice]
+
+    AiSignalResponse:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["BUY", "SELL", "HOLD"]
+        confidence:
+          type: number
+        reasoning:
+          type: string
+        riskLevel:
+          type: string
+          enum: ["low", "medium", "high"]
+        suggestedEntryPrice:
+          type: number
+        suggestedStopLoss:
+          type: number
+        suggestedTakeProfit:
+          type: number
+        analyzedAt:
+          type: number
+      required: [action, confidence, reasoning, riskLevel, analyzedAt]
+
+    PortfolioBalance:
+      type: object
+      properties:
+        totalUsd:
+          type: number
+        balances:
+          type: array
+          items:
+            type: object
+            properties:
+              asset:
+                type: string
+              free:
+                type: number
+              locked:
+                type: number
+              usdValue:
+                type: number
+            required: [asset, free, locked, usdValue]
+      required: [totalUsd, balances]
+
+    Position:
+      type: object
+      properties:
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: ["long", "short"]
+        entryPrice:
+          type: number
+        currentPrice:
+          type: number
+        quantity:
+          type: number
+        pnl:
+          type: number
+        pnlPercent:
+          type: number
+        openedAt:
+          type: number
+      required: [symbol, side, entryPrice, currentPrice, quantity, pnl, pnlPercent, openedAt]
+
+    TradeRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: ["buy", "sell"]
+        price:
+          type: number
+        quantity:
+          type: number
+        total:
+          type: number
+        fee:
+          type: number
+        pnl:
+          type: number
+        triggeredBy:
+          type: string
+          enum: ["manual", "bot", "ai"]
+        timestamp:
+          type: number
+      required: [id, symbol, side, price, quantity, total, fee, triggeredBy, timestamp]
+
+    PortfolioSummary:
+      type: object
+      properties:
+        totalValue:
+          type: number
+        totalPnl:
+          type: number
+        totalPnlPercent:
+          type: number
+        dayPnl:
+          type: number
+        dayPnlPercent:
+          type: number
+        winRate:
+          type: number
+        totalTrades:
+          type: integer
+        profitableTrades:
+          type: integer
+        bestTrade:
+          type: number
+        worstTrade:
+          type: number
+      required: [totalValue, totalPnl, totalPnlPercent, dayPnl, dayPnlPercent, winRate, totalTrades, profitableTrades]
+
+    PlaceOrderRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: ["buy", "sell"]
+        type:
+          type: string
+          enum: ["market", "limit"]
+        quantity:
+          type: number
+        price:
+          type: number
+      required: [symbol, side, type, quantity]
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: ["buy", "sell"]
+        type:
+          type: string
+          enum: ["market", "limit"]
+        status:
+          type: string
+          enum: ["open", "filled", "cancelled", "partial"]
+        price:
+          type: number
+        quantity:
+          type: number
+        filled:
+          type: number
+        timestamp:
+          type: number
+      required: [id, symbol, side, type, status, quantity, filled, timestamp]
+
+    BotStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        uptime:
+          type: number
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        lastSignal:
+          type: string
+        lastCheckedAt:
+          type: number
+        totalSignals:
+          type: integer
+        executedTrades:
+          type: integer
+      required: [running, totalSignals, executedTrades]
+
+    BotConfig:
+      type: object
+      properties:
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        tradeAmount:
+          type: number
+        maxPositions:
+          type: integer
+        stopLossPercent:
+          type: number
+        takeProfitPercent:
+          type: number
+        minConfidence:
+          type: number
+        enabledIndicators:
+          type: array
+          items:
+            type: string
+        autoTrade:
+          type: boolean
+        checkIntervalSeconds:
+          type: integer
+      required: [symbol, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, checkIntervalSeconds]
+
+    BotConfigUpdate:
+      type: object
+      properties:
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        tradeAmount:
+          type: number
+        maxPositions:
+          type: integer
+        stopLossPercent:
+          type: number
+        takeProfitPercent:
+          type: number
+        minConfidence:
+          type: number
+        enabledIndicators:
+          type: array
+          items:
+            type: string
+        autoTrade:
+          type: boolean
+        checkIntervalSeconds:
+          type: integer
+
+    BotLog:
+      type: object
+      properties:
+        id:
+          type: string
+        level:
+          type: string
+          enum: ["info", "warning", "error", "trade"]
+        message:
+          type: string
+        symbol:
+          type: string
+        action:
+          type: string
+        timestamp:
+          type: number
+      required: [id, level, message, timestamp]
