@@ -369,6 +369,14 @@ export const BotConfigMarginType = {
   CROSSED: "CROSSED",
 } as const;
 
+export type BotConfigEntryMode =
+  (typeof BotConfigEntryMode)[keyof typeof BotConfigEntryMode];
+
+export const BotConfigEntryMode = {
+  fixed: "fixed",
+  full: "full",
+} as const;
+
 export interface BotConfig {
   symbol: string;
   watchSymbols: string[];
@@ -397,6 +405,7 @@ export interface BotConfig {
   trailingDistancePercent: number;
   usePartialTp: boolean;
   partialTpPercent: number;
+  entryMode: BotConfigEntryMode;
 }
 
 export type BotConfigUpdateSymbolOverrides = { [key: string]: SymbolOverride };
@@ -407,6 +416,14 @@ export type BotConfigUpdateMarginType =
 export const BotConfigUpdateMarginType = {
   ISOLATED: "ISOLATED",
   CROSSED: "CROSSED",
+} as const;
+
+export type BotConfigUpdateEntryMode =
+  (typeof BotConfigUpdateEntryMode)[keyof typeof BotConfigUpdateEntryMode];
+
+export const BotConfigUpdateEntryMode = {
+  fixed: "fixed",
+  full: "full",
 } as const;
 
 export interface BotConfigUpdate {
@@ -436,6 +453,7 @@ export interface BotConfigUpdate {
   trailingDistancePercent?: number;
   usePartialTp?: boolean;
   partialTpPercent?: number;
+  entryMode?: BotConfigUpdateEntryMode;
 }
 
 export interface AuthStatus {

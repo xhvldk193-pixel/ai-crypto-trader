@@ -613,6 +613,7 @@ export const GetBotConfigResponse = zod.object({
   trailingDistancePercent: zod.number(),
   usePartialTp: zod.boolean(),
   partialTpPercent: zod.number(),
+  entryMode: zod.enum(["fixed", "full"]),
 });
 
 /**
@@ -659,6 +660,7 @@ export const UpdateBotConfigBody = zod.object({
   trailingDistancePercent: zod.number().optional(),
   usePartialTp: zod.boolean().optional(),
   partialTpPercent: zod.number().optional(),
+  entryMode: zod.enum(["fixed", "full"]).optional(),
 });
 
 export const UpdateBotConfigResponse = zod.object({
@@ -704,6 +706,7 @@ export const UpdateBotConfigResponse = zod.object({
   trailingDistancePercent: zod.number(),
   usePartialTp: zod.boolean(),
   partialTpPercent: zod.number(),
+  entryMode: zod.enum(["fixed", "full"]),
 });
 
 /**

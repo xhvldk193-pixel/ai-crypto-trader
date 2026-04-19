@@ -1174,7 +1174,10 @@ components:
           type: boolean
         partialTpPercent:
           type: number
-      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides, leverage, marginType, notifyOnError, useTrailingStop, trailingActivatePercent, trailingDistancePercent, usePartialTp, partialTpPercent]
+        entryMode:
+          type: string
+          enum: ["fixed", "full"]
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides, leverage, marginType, notifyOnError, useTrailingStop, trailingActivatePercent, trailingDistancePercent, usePartialTp, partialTpPercent, entryMode]
 
     BotConfigUpdate:
       type: object
@@ -1240,6 +1243,9 @@ components:
           type: boolean
         partialTpPercent:
           type: number
+        entryMode:
+          type: string
+          enum: ["fixed", "full"]
 
     SymbolOverride:
       type: object

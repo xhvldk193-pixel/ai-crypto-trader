@@ -54,6 +54,7 @@ const botConfigSchema = z.object({
   trailingDistancePercent: z.coerce.number().min(0.1).max(50),
   usePartialTp: z.boolean(),
   partialTpPercent: z.coerce.number().min(10).max(90),
+  entryMode: z.enum(["fixed", "full"]),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -117,12 +118,14 @@ export default function BotControl() {
       trailingDistancePercent: 0.5,
       usePartialTp: false,
       partialTpPercent: 50,
+      entryMode: "fixed",
     },
   });
 
   const useAiTargetsValue = form.watch("useAiTargets");
   const useTrailingValue = form.watch("useTrailingStop");
   const usePartialValue = form.watch("usePartialTp");
+  const entryModeValue = form.watch("entryMode");
 
   useEffect(() => {
     if (config) {
@@ -152,6 +155,7 @@ export default function BotControl() {
         trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
         usePartialTp: config.usePartialTp ?? false,
         partialTpPercent: config.partialTpPercent ?? 50,
+        entryMode: ((config as { entryMode?: string }).entryMode as "fixed" | "full") ?? "fixed",
       });
     }
   }, [config, form]);
@@ -321,15 +325,42 @@ export default function BotControl() {
                     )}
                   />
 
+                  <FormField
+                    control={form.control}
+                    name="entryMode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>진입 모드</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="진입 모드 선택" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="fixed">고정 시드 — 아래 거래 금액 사용</SelectItem>
+                            <SelectItem value="full">풀 진입 — 매 진입마다 가용 잔고 99% 전부 투입</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="tradeAmount"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>거래 금액 (USD)</FormLabel>
+                          <FormLabel>
+                            거래 금액 (USD){" "}
+                            {entryModeValue === "full" && (
+                              <span className="text-xs text-muted-foreground">(풀 진입 모드 — 무시됨)</span>
+                            )}
+                          </FormLabel>
                           <FormControl>
-                            <Input type="number" {...field} />
+                            <Input type="number" disabled={entryModeValue === "full"} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>

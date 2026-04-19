@@ -37,6 +37,7 @@ export const botConfigTable = pgTable("bot_config", {
   trailingDistancePercent: real("trailing_distance_percent").notNull().default(0.5),
   usePartialTp: boolean("use_partial_tp").notNull().default(false),
   partialTpPercent: real("partial_tp_percent").notNull().default(50.0),
+  entryMode: text("entry_mode").notNull().default("fixed"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

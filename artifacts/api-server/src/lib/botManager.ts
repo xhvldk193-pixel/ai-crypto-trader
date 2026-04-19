@@ -533,32 +533,34 @@ class BotManager {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
-      try {
-        const bal = await exchangeService.getBalance();
-        const usdt = bal.balances.find((b) => b.asset === "USDT");
-        const free = usdt?.free ?? 0;
-        const allIn = Math.floor(free * 0.99 * 100) / 100;
-        if (allIn <= 0) {
+      if ((config.entryMode ?? "fixed") === "full") {
+        try {
+          const bal = await exchangeService.getBalance();
+          const usdt = bal.balances.find((b) => b.asset === "USDT");
+          const free = usdt?.free ?? 0;
+          const allIn = Math.floor(free * 0.99 * 100) / 100;
+          if (allIn <= 0) {
+            await this.addLog(
+              "warning",
+              `${symbol} 진입 스킵 — 가용 USDT 잔고 없음 ($${free.toFixed(2)})`,
+              symbol,
+            );
+            return;
+          }
           await this.addLog(
-            "warning",
-            `${symbol} 진입 스킵 — 가용 USDT 잔고 없음 ($${free.toFixed(2)})`,
+            "info",
+            `${symbol} 풀 진입 모드 — 가용 잔고 $${free.toFixed(2)} × 99% = 증거금 $${allIn} 사용`,
+            symbol,
+          );
+          params = { ...params, tradeAmount: allIn };
+        } catch (err) {
+          await this.addLog(
+            "error",
+            `${symbol} 진입 스킵 — 잔고 조회 실패: ${err instanceof Error ? err.message : String(err)}`,
             symbol,
           );
           return;
         }
-        await this.addLog(
-          "info",
-          `${symbol} 풀 진입 — 가용 잔고 $${free.toFixed(2)} × 99% = 증거금 $${allIn} 사용`,
-          symbol,
-        );
-        params = { ...params, tradeAmount: allIn };
-      } catch (err) {
-        await this.addLog(
-          "error",
-          `${symbol} 진입 스킵 — 잔고 조회 실패: ${err instanceof Error ? err.message : String(err)}`,
-          symbol,
-        );
-        return;
       }
 
       const entryPrice = ticker.price;
