@@ -1,11 +1,24 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight, History } from "lucide-react";
-import { useGetBotStatus } from "@workspace/api-client-react";
+import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight, History, LogOut } from "lucide-react";
+import { useGetBotStatus, useLogout, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const { data: botStatus } = useGetBotStatus();
+  const logout = useLogout();
+  const qc = useQueryClient();
+
+  const handleLogout = async () => {
+    try {
+      await logout.mutateAsync();
+    } catch {
+      // ignore — fall through to clearing client state
+    }
+    qc.setQueryData(getGetAuthStatusQueryKey(), { authed: false, loggedInAt: null });
+    qc.clear();
+  };
 
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -57,6 +70,17 @@ export function Layout({ children }: { children: ReactNode }) {
             })}
           </ul>
         </nav>
+        <div className="border-t border-border p-2">
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={logout.isPending}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" />
+            로그아웃
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}

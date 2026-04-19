@@ -356,6 +356,11 @@ export interface BotConfigUpdate {
   symbolOverrides?: BotConfigUpdateSymbolOverrides;
 }
 
+export interface AuthStatus {
+  authed: boolean;
+  loggedInAt?: number | null;
+}
+
 export type BotLogLevel = (typeof BotLogLevel)[keyof typeof BotLogLevel];
 
 export const BotLogLevel = {
@@ -492,6 +497,15 @@ export interface BacktestResult {
   trades: BacktestTrade[];
   equityCurve: BacktestEquityPoint[];
 }
+
+export type LoginBody = {
+  password: string;
+};
+
+export type Login401 = {
+  error?: string;
+  authed?: boolean;
+};
 
 export type GetMarketSymbols200 = {
   symbols: string[];

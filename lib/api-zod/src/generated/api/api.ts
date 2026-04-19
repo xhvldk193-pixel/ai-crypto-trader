@@ -8,6 +8,34 @@
 import * as zod from "zod";
 
 /**
+ * @summary Authenticate the owner using the configured password
+ */
+export const LoginBody = zod.object({
+  password: zod.string(),
+});
+
+export const LoginResponse = zod.object({
+  authed: zod.boolean(),
+  loggedInAt: zod.number().nullish(),
+});
+
+/**
+ * @summary Destroy the current session
+ */
+export const LogoutResponse = zod.object({
+  authed: zod.boolean(),
+  loggedInAt: zod.number().nullish(),
+});
+
+/**
+ * @summary Check whether the current session is authenticated
+ */
+export const GetAuthStatusResponse = zod.object({
+  authed: zod.boolean(),
+  loggedInAt: zod.number().nullish(),
+});
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({

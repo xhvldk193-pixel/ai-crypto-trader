@@ -25,6 +25,66 @@ tags:
   - name: backtest
     description: Historical strategy backtesting
 paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Authenticate the owner using the configured password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+              required: [password]
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+        "401":
+          description: Invalid password
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  authed:
+                    type: boolean
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Destroy the current session
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /auth/me:
+    get:
+      operationId: getAuthStatus
+      tags: [auth]
+      summary: Check whether the current session is authenticated
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
   /healthz:
     get:
       operationId: healthCheck
@@ -995,6 +1055,16 @@ components:
           type: [number, "null"]
         stopLossPercent:
           type: [number, "null"]
+
+    AuthStatus:
+      type: object
+      properties:
+        authed:
+          type: boolean
+        loggedInAt:
+          type: number
+          nullable: true
+      required: [authed]
 
     BotLog:
       type: object

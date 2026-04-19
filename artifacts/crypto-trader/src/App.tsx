@@ -1,9 +1,9 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Layout } from "@/components/layout";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import NotFound from "@/pages/not-found";
 
 import Dashboard from "@/pages/dashboard";
@@ -12,15 +12,71 @@ import Portfolio from "@/pages/portfolio";
 import BotControl from "@/pages/bot";
 import Trade from "@/pages/trade";
 import Backtest from "@/pages/backtest";
+import LoginPage from "@/pages/login";
+import { useGetAuthStatus, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       staleTime: 5000,
+      retry: (failureCount, error: unknown) => {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status === 401 || status === 429) return false;
+        return failureCount < 2;
+      },
     },
   },
 });
+
+// Globally redirect to login on any 401 by invalidating the auth query.
+queryClient.getQueryCache().subscribe((event) => {
+  const error = event?.query?.state?.error as { response?: { status?: number } } | undefined;
+  if (error?.response?.status === 401) {
+    queryClient.setQueryData(getGetAuthStatusQueryKey(), { authed: false, loggedInAt: null });
+  }
+});
+queryClient.getMutationCache().subscribe((event) => {
+  const error = event?.mutation?.state?.error as { response?: { status?: number } } | undefined;
+  if (error?.response?.status === 401) {
+    queryClient.setQueryData(getGetAuthStatusQueryKey(), { authed: false, loggedInAt: null });
+  }
+});
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const qc = useQueryClient();
+  const { data, isLoading, isError } = useGetAuthStatus({
+    query: { refetchInterval: 60_000, retry: false } as never,
+  });
+
+  // When auth state changes from authed -> not authed, clear cached data so we don't leak prior results.
+  useEffect(() => {
+    if (data?.authed === false) {
+      qc.removeQueries({ predicate: (q) => {
+        const key = q.queryKey[0];
+        return typeof key === "string" && !key.includes("/auth/");
+      }});
+    }
+  }, [data?.authed, qc]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="w-full max-w-md space-y-3">
+          <Skeleton className="h-8 w-1/2 mx-auto" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !data?.authed) {
+    return <LoginPage />;
+  }
+
+  return <>{children}</>;
+}
 
 function Router() {
   return (
@@ -52,7 +108,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
+            <AuthGate>
+              <Router />
+            </AuthGate>
           </WouterRouter>
           <Toaster />
         </TooltipProvider>
