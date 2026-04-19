@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "vTzmKfX1cjZiSI23Lgq0c"
+uri = "file://exports/crypto-trader-project.tar.gz"
+type = "unspecified"
+title = "전체 프로젝트 (crypto-trader-project.tar.gz)"
