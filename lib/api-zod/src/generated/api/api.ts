@@ -450,6 +450,96 @@ export const UpdateBotConfigResponse = zod.object({
 });
 
 /**
+ * @summary Run a historical strategy backtest
+ */
+export const runBacktestBodyTimeframeDefault = `15m`;
+export const runBacktestBodyDaysDefault = 30;
+export const runBacktestBodyDaysMax = 180;
+
+export const runBacktestBodyInitialCapitalDefault = 10000;
+export const runBacktestBodyTradeAmountDefault = 1000;
+export const runBacktestBodyMinConfidenceDefault = 0.6;
+export const runBacktestBodyMinConfidenceMin = 0;
+export const runBacktestBodyMinConfidenceMax = 1;
+
+export const runBacktestBodyUseAtrTargetsDefault = true;
+export const runBacktestBodyFeePercentDefault = 0.001;
+
+export const RunBacktestBody = zod.object({
+  symbol: zod.string(),
+  timeframe: zod
+    .enum(["15m", "1h", "4h", "1d"])
+    .default(runBacktestBodyTimeframeDefault),
+  days: zod
+    .number()
+    .min(1)
+    .max(runBacktestBodyDaysMax)
+    .default(runBacktestBodyDaysDefault),
+  initialCapital: zod.number().default(runBacktestBodyInitialCapitalDefault),
+  tradeAmount: zod.number().default(runBacktestBodyTradeAmountDefault),
+  minConfidence: zod
+    .number()
+    .min(runBacktestBodyMinConfidenceMin)
+    .max(runBacktestBodyMinConfidenceMax)
+    .default(runBacktestBodyMinConfidenceDefault),
+  takeProfitPercent: zod.number().nullish(),
+  stopLossPercent: zod.number().nullish(),
+  useAtrTargets: zod.boolean().default(runBacktestBodyUseAtrTargetsDefault),
+  feePercent: zod.number().default(runBacktestBodyFeePercentDefault),
+});
+
+export const RunBacktestResponse = zod.object({
+  symbol: zod.string(),
+  timeframe: zod.string(),
+  startTime: zod.number(),
+  endTime: zod.number(),
+  candleCount: zod.number(),
+  initialCapital: zod.number(),
+  finalCapital: zod.number(),
+  totalPnl: zod.number(),
+  totalPnlPercent: zod.number(),
+  totalTrades: zod.number(),
+  winningTrades: zod.number(),
+  losingTrades: zod.number(),
+  winRate: zod.number(),
+  avgPnl: zod.number(),
+  avgWin: zod.number(),
+  avgLoss: zod.number(),
+  profitFactor: zod.number(),
+  maxDrawdown: zod.number(),
+  maxDrawdownPercent: zod.number(),
+  bestTrade: zod.number(),
+  worstTrade: zod.number(),
+  totalFees: zod.number(),
+  trades: zod.array(
+    zod.object({
+      id: zod.string(),
+      symbol: zod.string(),
+      side: zod.enum(["long", "short"]),
+      entryTime: zod.number(),
+      exitTime: zod.number(),
+      entryPrice: zod.number(),
+      exitPrice: zod.number(),
+      takeProfit: zod.number(),
+      stopLoss: zod.number(),
+      quantity: zod.number(),
+      pnl: zod.number(),
+      pnlPercent: zod.number(),
+      exitReason: zod.enum(["tp", "sl", "eod"]),
+      confidence: zod.number(),
+      expectedMovePercent: zod.number(),
+      reasoning: zod.string(),
+    }),
+  ),
+  equityCurve: zod.array(
+    zod.object({
+      timestamp: zod.number(),
+      equity: zod.number(),
+    }),
+  ),
+});
+
+/**
  * @summary Get recent bot activity logs
  */
 export const getBotLogsQueryLimitDefault = 50;

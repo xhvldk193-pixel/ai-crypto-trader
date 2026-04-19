@@ -171,6 +171,114 @@ async function fetchPublicTicker(symbol: string) {
   }
 }
 
+// ── Historical OHLCV with Binance → Coinbase fallback ───────────────────────
+
+type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
+
+const BINANCE_TF_MAP: Record<string, string> = {
+  "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1h": "1h", "4h": "4h", "1d": "1d",
+};
+
+const TIMEFRAME_MS: Record<string, number> = {
+  "1m": 60_000, "5m": 5 * 60_000, "15m": 15 * 60_000, "30m": 30 * 60_000,
+  "1h": 60 * 60_000, "4h": 4 * 60 * 60_000, "1d": 24 * 60 * 60_000,
+};
+
+async function fetchBinanceRange(
+  symbol: string, timeframe: string, startMs: number, endMs: number, maxCandles: number,
+): Promise<Candle[]> {
+  const interval = BINANCE_TF_MAP[timeframe] || "1h";
+  const s = toBinanceSymbol(symbol);
+  const PAGE = 1000;
+  const all: Candle[] = [];
+  let cursor = startMs;
+  while (cursor < endMs && all.length < maxCandles) {
+    try {
+      const data = await binancePublic(`/api/v3/klines`, {
+        symbol: s, interval,
+        startTime: cursor.toString(),
+        endTime: endMs.toString(),
+        limit: PAGE.toString(),
+      }) as Array<[number, string, string, string, string, string]>;
+      if (data.length === 0) break;
+      for (const k of data) {
+        all.push({
+          timestamp: k[0],
+          open: parseFloat(k[1]),
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4]),
+          volume: parseFloat(k[5]),
+        });
+        if (all.length >= maxCandles) break;
+      }
+      const lastOpen = data[data.length - 1][0];
+      if (data.length < PAGE) break;
+      cursor = lastOpen + 1;
+    } catch (err) {
+      logger.warn({ err }, "Binance klines failed; will try fallback");
+      return all;
+    }
+  }
+  return all;
+}
+
+const COINBASE_GRANULARITY: Record<string, number> = {
+  "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+  "1h": 3600, "4h": 14400, "1d": 86400,
+};
+
+function toCoinbaseProduct(symbol: string): string {
+  // Coinbase doesn't list every USDT pair as USDT; map common alts to USD.
+  const [base, quote] = symbol.split("/");
+  const cbQuote = quote === "USDT" ? "USD" : quote;
+  return `${base}-${cbQuote}`;
+}
+
+async function fetchCoinbaseRange(
+  symbol: string, timeframe: string, startMs: number, endMs: number, maxCandles: number,
+): Promise<Candle[]> {
+  const granSec = COINBASE_GRANULARITY[timeframe];
+  if (!granSec) return [];
+  const product = toCoinbaseProduct(symbol);
+  const PAGE = 300;
+  const stepMs = granSec * 1000 * PAGE;
+  const all: Candle[] = [];
+  let cursor = startMs;
+  while (cursor < endMs && all.length < maxCandles) {
+    const pageEnd = Math.min(endMs, cursor + stepMs);
+    const url = new URL(`https://api.exchange.coinbase.com/products/${product}/candles`);
+    url.searchParams.set("granularity", granSec.toString());
+    url.searchParams.set("start", new Date(cursor).toISOString());
+    url.searchParams.set("end", new Date(pageEnd).toISOString());
+    try {
+      const res = await fetch(url.toString(), { headers: { "user-agent": "ai-trader/1.0" } });
+      if (!res.ok) {
+        logger.warn({ status: res.status, product }, "Coinbase candles failed");
+        return all;
+      }
+      const data = await res.json() as Array<[number, number, number, number, number, number]>;
+      // Coinbase returns DESC; sort ASC and append.
+      const sorted = [...data].sort((a, b) => a[0] - b[0]);
+      for (const [time, low, high, open, close, volume] of sorted) {
+        all.push({
+          timestamp: time * 1000,
+          open, high, low, close, volume,
+        });
+        if (all.length >= maxCandles) break;
+      }
+      cursor = pageEnd + 1;
+      // Be polite to the public endpoint
+      await new Promise((r) => setTimeout(r, 120));
+    } catch (err) {
+      logger.warn({ err }, "Coinbase candles fetch error");
+      return all;
+    }
+  }
+  return all;
+}
+
 // ── Exchange service ─────────────────────────────────────────────────────────
 
 export const exchangeService = {
@@ -223,6 +331,29 @@ export const exchangeService = {
         return [];
       }
     }
+  },
+
+  /**
+   * Fetch a longer historical OHLCV window. Tries Binance first (1000-candle
+   * pages); if Binance is geo-blocked or returns nothing, falls back to
+   * Coinbase Exchange public klines (300-candle pages).
+   * Returns at most `maxCandles` (default 5000) sorted ascending.
+   */
+  async getOhlcvRange(
+    symbol: string,
+    timeframe: string,
+    startMs: number,
+    endMs: number,
+    maxCandles = 5000,
+  ) {
+    const tfMs = TIMEFRAME_MS[timeframe] ?? 60 * 60_000;
+    const expected = Math.min(maxCandles, Math.floor((endMs - startMs) / tfMs));
+    const minAcceptable = Math.max(1, Math.floor(expected * 0.5));
+    const binance = await fetchBinanceRange(symbol, timeframe, startMs, endMs, maxCandles);
+    if (binance.length >= minAcceptable) return binance;
+    const coinbase = await fetchCoinbaseRange(symbol, timeframe, startMs, endMs, maxCandles);
+    // Return whichever provider gave us more usable data.
+    return coinbase.length > binance.length ? coinbase : binance;
   },
 
   async getBalance() {

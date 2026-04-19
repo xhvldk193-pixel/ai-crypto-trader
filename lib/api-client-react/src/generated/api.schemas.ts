@@ -339,10 +339,7 @@ export type BacktestRequestTimeframe =
   (typeof BacktestRequestTimeframe)[keyof typeof BacktestRequestTimeframe];
 
 export const BacktestRequestTimeframe = {
-  "1m": "1m",
-  "5m": "5m",
   "15m": "15m",
-  "30m": "30m",
   "1h": "1h",
   "4h": "4h",
   "1d": "1d",
@@ -352,24 +349,29 @@ export interface BacktestRequest {
   symbol: string;
   timeframe?: BacktestRequestTimeframe;
   /**
-   * @minimum 100
-   * @maximum 1000
+   * @minimum 1
+   * @maximum 180
    */
-  candleCount?: number;
-  tradeAmountUsd?: number;
-  stopLossPercent?: number;
-  takeProfitPercent?: number;
+  days?: number;
+  initialCapital?: number;
+  tradeAmount?: number;
+  /**
+   * @minimum 0
+   * @maximum 1
+   */
+  minConfidence?: number;
+  takeProfitPercent?: number | null;
+  stopLossPercent?: number | null;
+  useAtrTargets?: boolean;
   feePercent?: number;
-  warmupBars?: number;
-  windowBars?: number;
 }
 
 export type BacktestTradeSide =
   (typeof BacktestTradeSide)[keyof typeof BacktestTradeSide];
 
 export const BacktestTradeSide = {
-  BUY: "BUY",
-  SELL: "SELL",
+  long: "long",
+  short: "short",
 } as const;
 
 export type BacktestTradeExitReason =
@@ -378,43 +380,31 @@ export type BacktestTradeExitReason =
 export const BacktestTradeExitReason = {
   tp: "tp",
   sl: "sl",
-  end: "end",
+  eod: "eod",
 } as const;
 
 export interface BacktestTrade {
+  id: string;
+  symbol: string;
+  side: BacktestTradeSide;
   entryTime: number;
   exitTime: number;
-  side: BacktestTradeSide;
   entryPrice: number;
   exitPrice: number;
   takeProfit: number;
   stopLoss: number;
   quantity: number;
-  pnlUsd: number;
+  pnl: number;
   pnlPercent: number;
   exitReason: BacktestTradeExitReason;
-  bullishCount: number;
-  bearishCount: number;
+  confidence: number;
+  expectedMovePercent: number;
+  reasoning: string;
 }
 
-export interface EquityPoint {
-  time: number;
+export interface BacktestEquityPoint {
+  timestamp: number;
   equity: number;
-}
-
-export interface BacktestMetrics {
-  initialEquity: number;
-  finalEquity: number;
-  totalReturnPercent: number;
-  totalTrades: number;
-  wins: number;
-  losses: number;
-  winRatePercent: number;
-  avgWinUsd: number;
-  avgLossUsd: number;
-  profitFactor: number;
-  maxDrawdownPercent: number;
-  sharpeRatio: number;
 }
 
 export interface BacktestResult {
@@ -422,9 +412,26 @@ export interface BacktestResult {
   timeframe: string;
   startTime: number;
   endTime: number;
+  candleCount: number;
+  initialCapital: number;
+  finalCapital: number;
+  totalPnl: number;
+  totalPnlPercent: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  avgPnl: number;
+  avgWin: number;
+  avgLoss: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  maxDrawdownPercent: number;
+  bestTrade: number;
+  worstTrade: number;
+  totalFees: number;
   trades: BacktestTrade[];
-  equityCurve: EquityPoint[];
-  metrics: BacktestMetrics;
+  equityCurve: BacktestEquityPoint[];
 }
 
 export type GetMarketSymbols200 = {

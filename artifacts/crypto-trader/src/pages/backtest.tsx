@@ -1,277 +1,461 @@
 import { useState } from "react";
-import { useRunBacktest, useGetMarketSymbols } from "@workspace/api-client-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import {
+  useRunBacktest,
+  useGetMarketSymbols,
+  type BacktestResult,
+} from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatUsd, formatNumber } from "@/lib/format";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import { TrendingUp, TrendingDown, Activity, Play } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
+import { Play, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
+import { formatUsd, formatPercent, formatDate, formatNumber } from "@/lib/format";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ReferenceLine,
+} from "recharts";
 
-type Timeframe = "15m" | "1h" | "4h" | "1d";
+const schema = z.object({
+  symbol: z.string().min(1),
+  timeframe: z.enum(["15m", "1h", "4h", "1d"]),
+  days: z.coerce.number().min(1).max(180),
+  initialCapital: z.coerce.number().min(100),
+  tradeAmount: z.coerce.number().min(10),
+  minConfidence: z.coerce.number().min(0).max(1),
+  useAtrTargets: z.boolean(),
+  takeProfitPercent: z.coerce.number().min(0.1).max(50),
+  stopLossPercent: z.coerce.number().min(0.1).max(50),
+});
 
-function formatDate(ts: number) {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
+type FormValues = z.infer<typeof schema>;
 
 export default function Backtest() {
+  const { toast } = useToast();
   const { data: symbolsData } = useGetMarketSymbols();
-  const symbols = symbolsData?.symbols || ["BTC/USDT", "ETH/USDT", "SOL/USDT"];
+  const symbols = symbolsData?.symbols || ["BTC/USDT"];
+  const [result, setResult] = useState<BacktestResult | null>(null);
 
-  const [symbol, setSymbol] = useState("BTC/USDT");
-  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
-  const [candleCount, setCandleCount] = useState(500);
-  const [tradeAmountUsd, setTradeAmountUsd] = useState(100);
-  const [stopLossPercent, setStopLossPercent] = useState(2);
-  const [takeProfitPercent, setTakeProfitPercent] = useState(5);
-  const [feePercent, setFeePercent] = useState(0.1);
+  const runMut = useRunBacktest();
 
-  const runBacktest = useRunBacktest();
-  const result = runBacktest.data;
-  const isLoading = runBacktest.isPending;
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      symbol: "BTC/USDT",
+      timeframe: "15m",
+      days: 30,
+      initialCapital: 10000,
+      tradeAmount: 1000,
+      minConfidence: 0.6,
+      useAtrTargets: true,
+      takeProfitPercent: 2,
+      stopLossPercent: 1,
+    },
+  });
 
-  const handleRun = () => {
-    runBacktest.mutate({
-      data: {
-        symbol,
-        timeframe,
-        candleCount,
-        tradeAmountUsd,
-        stopLossPercent,
-        takeProfitPercent,
-        feePercent,
-        warmupBars: 60,
-        windowBars: 100,
+  const useAtr = form.watch("useAtrTargets");
+
+  const onSubmit = (data: FormValues) => {
+    setResult(null);
+    runMut.mutate(
+      {
+        data: {
+          symbol: data.symbol,
+          timeframe: data.timeframe,
+          days: data.days,
+          initialCapital: data.initialCapital,
+          tradeAmount: data.tradeAmount,
+          minConfidence: data.minConfidence,
+          useAtrTargets: data.useAtrTargets,
+          takeProfitPercent: data.useAtrTargets ? null : data.takeProfitPercent,
+          stopLossPercent: data.useAtrTargets ? null : data.stopLossPercent,
+          feePercent: 0.001,
+        },
       },
-    });
+      {
+        onSuccess: (res) => {
+          setResult(res);
+          toast({
+            title: "백테스트 완료",
+            description: `${res.totalTrades}건 거래 / 승률 ${res.winRate.toFixed(1)}% / P&L ${res.totalPnlPercent >= 0 ? "+" : ""}${res.totalPnlPercent.toFixed(2)}%`,
+          });
+        },
+        onError: (err: unknown) => {
+          const msg = err instanceof Error ? err.message : "백테스트 실행에 실패했습니다.";
+          toast({ title: "오류", description: msg, variant: "destructive" });
+        },
+      },
+    );
   };
-
-  const equityChart = (result?.equityCurve ?? []).map((p) => ({
-    time: p.time,
-    label: formatDate(p.time),
-    equity: p.equity,
-  }));
-
-  const totalReturn = result?.metrics.totalReturnPercent ?? 0;
-  const isProfitable = totalReturn >= 0;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">백테스트</h1>
-          <p className="text-muted-foreground">과거 데이터로 다이버전스 전략을 검증합니다</p>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">백테스트</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          과거 캔들 데이터로 다이버전스 + 결정론적 전략을 시뮬레이션해 성과를 검증합니다. (AI 호출 없음)
+        </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-4">
-        <Card className="lg:col-span-1">
+      <div className="grid gap-6 lg:grid-cols-12">
+        <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle>설정</CardTitle>
-            <CardDescription>전략 파라미터</CardDescription>
+            <CardDescription>심볼과 기간을 선택해 시뮬레이션을 실행하세요.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>심볼</Label>
-              <Select value={symbol} onValueChange={setSymbol}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {symbols.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>타임프레임</Label>
-              <Select value={timeframe} onValueChange={(v) => setTimeframe(v as Timeframe)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="15m">15분</SelectItem>
-                  <SelectItem value="1h">1시간</SelectItem>
-                  <SelectItem value="4h">4시간</SelectItem>
-                  <SelectItem value="1d">1일</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>캔들 개수 (100-1000)</Label>
-              <Input type="number" min={100} max={1000} value={candleCount} onChange={(e) => setCandleCount(Number(e.target.value))} />
-            </div>
-            <div className="space-y-2">
-              <Label>거래 금액 (USDT)</Label>
-              <Input type="number" min={10} step={10} value={tradeAmountUsd} onChange={(e) => setTradeAmountUsd(Number(e.target.value))} />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2">
-                <Label>손절 (%)</Label>
-                <Input type="number" step="0.1" value={stopLossPercent} onChange={(e) => setStopLossPercent(Number(e.target.value))} />
-              </div>
-              <div className="space-y-2">
-                <Label>익절 (%)</Label>
-                <Input type="number" step="0.1" value={takeProfitPercent} onChange={(e) => setTakeProfitPercent(Number(e.target.value))} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>수수료 (%)</Label>
-              <Input type="number" step="0.01" value={feePercent} onChange={(e) => setFeePercent(Number(e.target.value))} />
-            </div>
-            <Button onClick={handleRun} disabled={isLoading} className="w-full">
-              <Play className="mr-2 h-4 w-4" />
-              {isLoading ? "실행 중..." : "백테스트 실행"}
-            </Button>
-            {runBacktest.isError && (
-              <p className="text-xs text-negative">실패: 캔들 수를 줄이거나 다시 시도하세요.</p>
-            )}
+          <CardContent>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="symbol"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>심볼</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {symbols.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="timeframe"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>타임프레임</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="15m">15분</SelectItem>
+                            <SelectItem value="1h">1시간</SelectItem>
+                            <SelectItem value="4h">4시간</SelectItem>
+                            <SelectItem value="1d">1일</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="days"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>기간 (일)</FormLabel>
+                      <FormControl><Input type="number" {...field} /></FormControl>
+                      <FormDescription>최대 180일.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="initialCapital"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>초기 자본 (USD)</FormLabel>
+                        <FormControl><Input type="number" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="tradeAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>건당 거래액 (USD)</FormLabel>
+                        <FormControl><Input type="number" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="minConfidence"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>최소 신뢰도 (0-1)</FormLabel>
+                      <FormControl><Input type="number" step="0.05" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="useAtrTargets"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">ATR 기반 TP/SL</FormLabel>
+                        <FormDescription>
+                          켜면 변동성에 맞춰 자동, 끄면 아래 고정 % 사용.
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="takeProfitPercent"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>익절 (%)</FormLabel>
+                        <FormControl><Input type="number" step="0.1" disabled={useAtr} {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="stopLossPercent"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>손절 (%)</FormLabel>
+                        <FormControl><Input type="number" step="0.1" disabled={useAtr} {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={runMut.isPending}>
+                  {runMut.isPending ? (
+                    <><RefreshCw className="mr-2 h-4 w-4 animate-spin" /> 실행 중...</>
+                  ) : (
+                    <><Play className="mr-2 h-4 w-4" /> 백테스트 실행</>
+                  )}
+                </Button>
+              </form>
+            </Form>
           </CardContent>
         </Card>
 
-        <div className="lg:col-span-3 space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="lg:col-span-8 space-y-6">
+          {runMut.isPending ? (
             <Card>
-              <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground mb-1">총 수익률</div>
-                {isLoading ? <Skeleton className="h-7 w-24" /> : (
-                  <div className={`text-2xl font-bold font-mono ${isProfitable ? "text-positive" : "text-negative"}`}>
-                    {result ? `${totalReturn >= 0 ? "+" : ""}${formatNumber(totalReturn)}%` : "-"}
-                  </div>
-                )}
+              <CardContent className="py-12 space-y-3">
+                <Skeleton className="h-8 w-1/2" />
+                <Skeleton className="h-64 w-full" />
               </CardContent>
             </Card>
+          ) : result ? (
+            <ResultsView result={result} />
+          ) : (
             <Card>
-              <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground mb-1">승률</div>
-                {isLoading ? <Skeleton className="h-7 w-24" /> : (
-                  <div className="text-2xl font-bold font-mono">
-                    {result ? `${formatNumber(result.metrics.winRatePercent)}%` : "-"}
-                  </div>
-                )}
-                {result && (
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {result.metrics.wins}승 / {result.metrics.losses}패
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground mb-1">최대 낙폭</div>
-                {isLoading ? <Skeleton className="h-7 w-24" /> : (
-                  <div className="text-2xl font-bold font-mono text-negative">
-                    {result ? `-${formatNumber(result.metrics.maxDrawdownPercent)}%` : "-"}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-xs text-muted-foreground mb-1">손익비 (PF)</div>
-                {isLoading ? <Skeleton className="h-7 w-24" /> : (
-                  <div className="text-2xl font-bold font-mono">
-                    {result ? (Number.isFinite(result.metrics.profitFactor) ? formatNumber(result.metrics.profitFactor) : "∞") : "-"}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle>자본 곡선</CardTitle>
-              <CardDescription>
-                {result ? `${formatDate(result.startTime)} → ${formatDate(result.endTime)} · 시작 ${formatUsd(result.metrics.initialEquity)} → 종료 ${formatUsd(result.metrics.finalEquity)}` : "백테스트를 실행하세요"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="h-[320px]">
-              {isLoading ? (
-                <Skeleton className="w-full h-full" />
-              ) : equityChart.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                  결과가 여기에 표시됩니다
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={equityChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={11} tickLine={false} axisLine={false} minTickGap={40} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} tickFormatter={(v) => `$${(v as number).toFixed(0)}`} tickLine={false} axisLine={false} domain={["auto", "auto"]} />
-                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))" }} formatter={(v: number) => [formatUsd(v), "자본"]} />
-                    <ReferenceLine y={result?.metrics.initialEquity ?? 10000} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
-                    <Line type="monotone" dataKey="equity" stroke={isProfitable ? "hsl(var(--positive))" : "hsl(var(--negative))"} strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-
-          {result && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center justify-between">
-                  <span>거래 내역</span>
-                  <Badge variant="secondary">{result.trades.length}건</Badge>
-                </CardTitle>
-                <CardDescription>
-                  평균 익절 {formatUsd(result.metrics.avgWinUsd)} · 평균 손절 {formatUsd(result.metrics.avgLossUsd)} · Sharpe {formatNumber(result.metrics.sharpeRatio)}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {result.trades.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">
-                    <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    이 기간에는 다이버전스 신호가 없었습니다
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-xs text-muted-foreground border-b border-border">
-                        <tr>
-                          <th className="text-left py-2 px-2 font-medium">진입</th>
-                          <th className="text-left py-2 px-2 font-medium">청산</th>
-                          <th className="text-left py-2 px-2 font-medium">방향</th>
-                          <th className="text-right py-2 px-2 font-medium">진입가</th>
-                          <th className="text-right py-2 px-2 font-medium">청산가</th>
-                          <th className="text-right py-2 px-2 font-medium">손익</th>
-                          <th className="text-center py-2 px-2 font-medium">사유</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.trades.slice().reverse().map((t, i) => (
-                          <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                            <td className="py-2 px-2 text-xs text-muted-foreground">{formatDate(t.entryTime)}</td>
-                            <td className="py-2 px-2 text-xs text-muted-foreground">{formatDate(t.exitTime)}</td>
-                            <td className="py-2 px-2">
-                              <Badge variant="outline" className={t.side === "BUY" ? "border-positive text-positive" : "border-negative text-negative"}>
-                                {t.side === "BUY" ? <TrendingUp className="h-3 w-3 mr-1 inline" /> : <TrendingDown className="h-3 w-3 mr-1 inline" />}
-                                {t.side}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-2 text-right font-mono text-xs">{formatUsd(t.entryPrice)}</td>
-                            <td className="py-2 px-2 text-right font-mono text-xs">{formatUsd(t.exitPrice)}</td>
-                            <td className={`py-2 px-2 text-right font-mono font-semibold ${t.pnlUsd >= 0 ? "text-positive" : "text-negative"}`}>
-                              {t.pnlUsd >= 0 ? "+" : ""}{formatUsd(t.pnlUsd)}
-                              <div className="text-xs font-normal opacity-70">
-                                {t.pnlPercent >= 0 ? "+" : ""}{formatNumber(t.pnlPercent)}%
-                              </div>
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <Badge variant="secondary" className="text-xs">
-                                {t.exitReason === "tp" ? "익절" : t.exitReason === "sl" ? "손절" : "종료"}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+              <CardContent className="py-16 text-center text-muted-foreground">
+                좌측에서 설정을 선택한 뒤 <span className="font-bold">백테스트 실행</span>을 눌러주세요.
               </CardContent>
             </Card>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ResultsView({ result }: { result: BacktestResult }) {
+  const equityData = result.equityCurve.map((p) => ({
+    t: p.timestamp,
+    equity: p.equity,
+  }));
+  const positiveTotal = result.totalPnl >= 0;
+
+  return (
+    <>
+      <div className="grid gap-4 md:grid-cols-4">
+        <SummaryCard
+          label="순손익"
+          value={`${positiveTotal ? "+" : ""}${formatUsd(result.totalPnl)}`}
+          sub={`${positiveTotal ? "+" : ""}${result.totalPnlPercent.toFixed(2)}%`}
+          positive={positiveTotal}
+        />
+        <SummaryCard
+          label="승률"
+          value={`${result.winRate.toFixed(1)}%`}
+          sub={`${result.winningTrades}W / ${result.losingTrades}L (총 ${result.totalTrades})`}
+        />
+        <SummaryCard
+          label="최대 낙폭"
+          value={`-${formatUsd(result.maxDrawdown)}`}
+          sub={`-${result.maxDrawdownPercent.toFixed(2)}%`}
+          positive={false}
+        />
+        <SummaryCard
+          label="Profit Factor"
+          value={
+            result.profitFactor >= 999
+              ? "∞"
+              : result.profitFactor.toFixed(2)
+          }
+          sub={`평균 손익 ${formatUsd(result.avgPnl)}`}
+        />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>자본 곡선</CardTitle>
+          <CardDescription>
+            {formatDate(result.startTime)} – {formatDate(result.endTime)} · {result.candleCount} 캔들
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={equityData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis
+                dataKey="t"
+                stroke="hsl(var(--muted-foreground))"
+                tickFormatter={(v) => formatDate(v as number).split(",")[0]}
+                fontSize={11}
+                minTickGap={40}
+              />
+              <YAxis
+                stroke="hsl(var(--muted-foreground))"
+                domain={["auto", "auto"]}
+                tickFormatter={(v) => `$${formatNumber(v as number, 0)}`}
+                fontSize={11}
+                width={70}
+              />
+              <RechartsTooltip
+                contentStyle={{
+                  backgroundColor: "hsl(var(--card))",
+                  borderColor: "hsl(var(--border))",
+                  fontSize: 12,
+                }}
+                labelFormatter={(v) => formatDate(v as number)}
+                formatter={(v: number) => [formatUsd(v), "Equity"]}
+              />
+              <ReferenceLine
+                y={result.initialCapital}
+                stroke="hsl(var(--muted-foreground))"
+                strokeDasharray="4 4"
+                label={{ value: "초기자본", fill: "hsl(var(--muted-foreground))", fontSize: 10, position: "right" }}
+              />
+              <Line
+                type="monotone"
+                dataKey="equity"
+                stroke={positiveTotal ? "hsl(152, 76%, 50%)" : "hsl(0, 76%, 60%)"}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>거래 내역</CardTitle>
+          <CardDescription>
+            평균 익절 {formatUsd(result.avgWin)} / 평균 손절 {formatUsd(result.avgLoss)} / 수수료 합계 {formatUsd(result.totalFees)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {result.trades.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg">
+              조건에 맞는 거래가 없습니다.
+            </div>
+          ) : (
+            <div className="max-h-[480px] overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-card">
+                  <TableRow>
+                    <TableHead>진입</TableHead>
+                    <TableHead>청산</TableHead>
+                    <TableHead>방향</TableHead>
+                    <TableHead>진입가</TableHead>
+                    <TableHead>청산가</TableHead>
+                    <TableHead>사유</TableHead>
+                    <TableHead className="text-right">P&L</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {result.trades.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="text-muted-foreground text-xs">{formatDate(t.entryTime)}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{formatDate(t.exitTime)}</TableCell>
+                      <TableCell>
+                        <Badge
+                          className={t.side === "long" ? "bg-positive hover:bg-positive/90" : "bg-negative hover:bg-negative/90"}
+                        >
+                          {t.side === "long" ? <TrendingUp className="mr-1 h-3 w-3" /> : <TrendingDown className="mr-1 h-3 w-3" />}
+                          {t.side.toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono">{formatUsd(t.entryPrice)}</TableCell>
+                      <TableCell className="font-mono">{formatUsd(t.exitPrice)}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs uppercase">{t.exitReason}</Badge>
+                      </TableCell>
+                      <TableCell className={`text-right font-mono ${t.pnl >= 0 ? "text-positive" : "text-negative"}`}>
+                        {t.pnl >= 0 ? "+" : ""}{formatUsd(t.pnl)}
+                        <div className="text-xs text-muted-foreground">{formatPercent(t.pnlPercent)}</div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  sub,
+  positive,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  positive?: boolean;
+}) {
+  const colorClass = positive === undefined ? "" : positive ? "text-positive" : "text-negative";
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className={`text-2xl font-bold font-mono ${colorClass}`}>{value}</div>
+        {sub && <div className="text-xs text-muted-foreground mt-1 font-mono">{sub}</div>}
+      </CardContent>
+    </Card>
   );
 }
