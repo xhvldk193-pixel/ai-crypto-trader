@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -75,3 +75,6 @@ externalPort = 8000
 
 [userenv.production]
 BINANCE_LIVE_MODE = "true"
+
+[nix]
+channel = "stable-25_05"
