@@ -453,6 +453,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/BacktestResult"
 
+  /bot/reflections:
+    get:
+      operationId: getBotReflections
+      tags: [bot]
+      summary: Get recent AI trade reflections (post-mortem learning notes)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Trade reflections
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reflections:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TradeReflection"
+
   /bot/logs:
     get:
       operationId: getBotLogs
@@ -964,6 +991,50 @@ components:
         timestamp:
           type: number
       required: [id, level, message, timestamp]
+
+    TradeReflection:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        timeframe:
+          type: string
+          nullable: true
+        side:
+          type: string
+        entryPrice:
+          type: number
+        exitPrice:
+          type: number
+        exitReason:
+          type: string
+        pnl:
+          type: number
+        pnlPercent:
+          type: number
+        holdSeconds:
+          type: integer
+        originalConfidence:
+          type: number
+          nullable: true
+        originalExpectedMovePercent:
+          type: number
+          nullable: true
+        originalReasoning:
+          type: string
+          nullable: true
+        bullishCount:
+          type: integer
+        bearishCount:
+          type: integer
+        lessonText:
+          type: string
+          nullable: true
+        timestamp:
+          type: number
+      required: [id, symbol, side, entryPrice, exitPrice, exitReason, pnl, pnlPercent, holdSeconds, bullishCount, bearishCount, timestamp]
 
     BacktestRequest:
       type: object

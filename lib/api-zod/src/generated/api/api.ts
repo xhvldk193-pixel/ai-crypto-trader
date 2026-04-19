@@ -593,6 +593,46 @@ export const RunBacktestResponse = zod.object({
 });
 
 /**
+ * @summary Get recent AI trade reflections (post-mortem learning notes)
+ */
+export const getBotReflectionsQueryLimitDefault = 20;
+export const getBotReflectionsQueryLimitMax = 100;
+
+export const GetBotReflectionsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getBotReflectionsQueryLimitMax)
+    .default(getBotReflectionsQueryLimitDefault),
+});
+
+export const GetBotReflectionsResponse = zod.object({
+  reflections: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        symbol: zod.string(),
+        timeframe: zod.string().nullish(),
+        side: zod.string(),
+        entryPrice: zod.number(),
+        exitPrice: zod.number(),
+        exitReason: zod.string(),
+        pnl: zod.number(),
+        pnlPercent: zod.number(),
+        holdSeconds: zod.number(),
+        originalConfidence: zod.number().nullish(),
+        originalExpectedMovePercent: zod.number().nullish(),
+        originalReasoning: zod.string().nullish(),
+        bullishCount: zod.number(),
+        bearishCount: zod.number(),
+        lessonText: zod.string().nullish(),
+        timestamp: zod.number(),
+      }),
+    )
+    .optional(),
+});
+
+/**
  * @summary Get recent bot activity logs
  */
 export const getBotLogsQueryLimitDefault = 50;

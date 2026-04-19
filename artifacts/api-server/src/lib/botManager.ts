@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
-import { botConfigTable, botLogsTable, tradeHistoryTable, activePositionsTable, aiSignalsTable } from "@workspace/db";
-import { eq, gte, sql } from "drizzle-orm";
+import { botConfigTable, botLogsTable, tradeHistoryTable, activePositionsTable, aiSignalsTable, tradeReflectionsTable } from "@workspace/db";
+import { eq, gte, sql, desc } from "drizzle-orm";
 import { exchangeService } from "./exchange";
 import { analyzeDivergences } from "./divergence";
 import { computeAtrPercent } from "./indicators";
@@ -510,6 +510,7 @@ class BotManager {
         );
         const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
         const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+        const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
 
         await db.insert(tradeHistoryTable).values({
           symbol: pos.symbol,
@@ -522,6 +523,45 @@ class BotManager {
           triggeredBy: "bot",
         });
 
+        // Look up the most recent AI signal for this symbol to enrich the reflection
+        let bullishCount = 0, bearishCount = 0, originalConfidence: number | null = pos.aiConfidence;
+        let originalReasoning: string | null = pos.aiReasoning;
+        let originalExpectedMovePercent: number | null = pos.expectedMovePercent;
+        let timeframe: string | null = null;
+        try {
+          const recent = await db.select().from(aiSignalsTable)
+            .where(eq(aiSignalsTable.symbol, pos.symbol))
+            .orderBy(desc(aiSignalsTable.createdAt))
+            .limit(1);
+          if (recent.length > 0) {
+            bullishCount = recent[0].bullishCount;
+            bearishCount = recent[0].bearishCount;
+            timeframe = recent[0].timeframe;
+            if (originalConfidence == null) originalConfidence = recent[0].confidence;
+            if (!originalReasoning) originalReasoning = recent[0].reasoning;
+            if (originalExpectedMovePercent == null) originalExpectedMovePercent = recent[0].expectedMovePercent;
+          }
+        } catch {
+          // best-effort
+        }
+
+        const [reflectionRow] = await db.insert(tradeReflectionsTable).values({
+          symbol: pos.symbol,
+          timeframe,
+          side: pos.side,
+          entryPrice: pos.entryPrice,
+          exitPrice: price,
+          exitReason,
+          pnl,
+          pnlPercent: pnlPct,
+          holdSeconds,
+          originalConfidence,
+          originalExpectedMovePercent,
+          originalReasoning,
+          bullishCount,
+          bearishCount,
+        }).returning();
+
         await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
 
         await this.addLog(
@@ -530,10 +570,108 @@ class BotManager {
           pos.symbol,
           isLong ? "SELL" : "BUY"
         );
+
+        // Generate AI lesson asynchronously — never block the position close
+        if (reflectionRow) {
+          this.writeReflectionLesson(reflectionRow.id, {
+            symbol: pos.symbol,
+            timeframe: timeframe ?? "15m",
+            side: pos.side,
+            entryPrice: pos.entryPrice,
+            exitPrice: price,
+            exitReason,
+            pnlPercent: pnlPct,
+            holdSeconds,
+            originalConfidence: originalConfidence ?? null,
+            originalExpectedMovePercent: originalExpectedMovePercent ?? null,
+            originalReasoning: originalReasoning ?? null,
+            bullishCount,
+            bearishCount,
+          }).catch((err) => logger.warn({ err, id: reflectionRow.id }, "Reflection lesson generation failed"));
+        }
       } catch (err) {
         await this.addLog("error", `포지션 청산 실패 (${pos.symbol}): ${err instanceof Error ? err.message : String(err)}`, pos.symbol);
       }
     }));
+  }
+
+  /** Async: ask Claude to write a 2-3 sentence Korean post-mortem note */
+  private async writeReflectionLesson(reflectionId: number, ctx: {
+    symbol: string;
+    timeframe: string;
+    side: string;
+    entryPrice: number;
+    exitPrice: number;
+    exitReason: string;
+    pnlPercent: number;
+    holdSeconds: number;
+    originalConfidence: number | null;
+    originalExpectedMovePercent: number | null;
+    originalReasoning: string | null;
+    bullishCount: number;
+    bearishCount: number;
+  }) {
+    const verdict = ctx.exitReason === "TP" ? "성공" : "실패";
+    const userMessage = `다음은 방금 종료된 자동 매매의 결과입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
+다음에 비슷한 상황에서 AI가 참고할 수 있게 핵심 교훈만 짧고 구체적으로 적으세요.
+"이런 조건일 때 진입을 보류한다", "이런 조합은 신뢰도를 더 높여서 본다" 같은 실용적 지침 위주로 작성하세요.
+
+거래 정보:
+- 심볼: ${ctx.symbol}, 타임프레임: ${ctx.timeframe}, 방향: ${ctx.side.toUpperCase()}
+- 결과: ${verdict} (${ctx.exitReason}) — 손익 ${ctx.pnlPercent >= 0 ? "+" : ""}${ctx.pnlPercent.toFixed(2)}%
+- 진입가 $${ctx.entryPrice.toFixed(4)} → 청산가 $${ctx.exitPrice.toFixed(4)}, 보유 ${Math.floor(ctx.holdSeconds / 60)}분
+- 진입 시 강세 다이버전스 ${ctx.bullishCount}개 / 약세 ${ctx.bearishCount}개
+- 당시 AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
+- 당시 예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
+- 당시 진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
+
+JSON 없이, 순수 한국어 텍스트만 출력하세요.`;
+
+    try {
+      const message = await anthropic.messages.create({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 512,
+        system: "당신은 트레이딩 봇의 복기를 돕는 분석가입니다. 결과의 원인과 다음에 적용할 구체적 규칙을 짧고 명확하게 작성합니다.",
+        messages: [{ role: "user", content: userMessage }],
+      });
+      const block = message.content[0];
+      const text = block && block.type === "text" ? block.text.trim() : "";
+      if (!text) return;
+      await db.update(tradeReflectionsTable).set({ lessonText: text }).where(eq(tradeReflectionsTable.id, reflectionId));
+    } catch (err) {
+      logger.warn({ err, reflectionId }, "Failed to generate reflection lesson");
+    }
+  }
+
+  /** Fetch recent reflections for a symbol (and a few global) for AI context */
+  private async fetchRecentReflections(symbol: string): Promise<string> {
+    try {
+      const symbolRows = await db.select().from(tradeReflectionsTable)
+        .where(eq(tradeReflectionsTable.symbol, symbol))
+        .orderBy(desc(tradeReflectionsTable.createdAt))
+        .limit(8);
+      let rows = symbolRows;
+      if (rows.length < 4) {
+        const globalRows = await db.select().from(tradeReflectionsTable)
+          .orderBy(desc(tradeReflectionsTable.createdAt))
+          .limit(8);
+        const seen = new Set(rows.map((r) => r.id));
+        for (const g of globalRows) {
+          if (rows.length >= 8) break;
+          if (!seen.has(g.id)) rows.push(g);
+        }
+      }
+      if (rows.length === 0) return "  (아직 복기 데이터 없음)";
+      return rows.map((r) => {
+        const verdict = r.exitReason === "TP" ? "✓익절" : r.exitReason === "SL" ? "✗손절" : r.exitReason;
+        const pnlPart = `${r.pnlPercent >= 0 ? "+" : ""}${r.pnlPercent.toFixed(2)}%`;
+        const lesson = r.lessonText ? r.lessonText.replace(/\s+/g, " ").trim() : "(복기 노트 생성 중)";
+        return `  - [${verdict} ${pnlPart}] ${r.symbol} ${r.side.toUpperCase()} 강세${r.bullishCount}/약세${r.bearishCount}: ${lesson}`;
+      }).join("\n");
+    } catch (err) {
+      logger.warn({ err }, "Failed to fetch reflections");
+      return "  (복기 데이터 조회 실패)";
+    }
   }
 
   private async getAiDecision(input: {
@@ -587,6 +725,8 @@ Respond ONLY with valid JSON (no markdown, no prose):
       ? `Open interest: ${openInterest.toLocaleString()} contracts`
       : "Open interest: unavailable";
 
+    const reflections = await this.fetchRecentReflections(symbol);
+
     const userMessage = `Symbol: ${symbol}
 Timeframe: ${timeframe}
 Current Price: $${currentPrice.toFixed(2)}
@@ -605,7 +745,10 @@ Futures context:
 ${frText}
 ${oiText}
 
-Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.`;
+최근 거래 복기 (지난 결과로부터 학습할 것 — 비슷한 조건이면 패턴을 따르고, 반복된 손절 조합은 회피하세요):
+${reflections}
+
+Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL. 위 복기 노트의 교훈을 반드시 reasoning에 1번 이상 반영하세요.`;
 
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { botConfigTable, botLogsTable, tradeHistoryTable } from "@workspace/db";
+import { botConfigTable, botLogsTable, tradeHistoryTable, tradeReflectionsTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { botManager } from "../lib/botManager";
 
@@ -102,6 +102,37 @@ router.get("/logs", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to get bot logs");
     res.status(500).json({ error: "Failed to get bot logs" });
+  }
+});
+
+router.get("/reflections", async (req, res) => {
+  const limit = Math.min(parseInt((req.query.limit as string) || "20", 10), 100);
+  try {
+    const rows = await db.select().from(tradeReflectionsTable).orderBy(desc(tradeReflectionsTable.createdAt)).limit(limit);
+    res.json({
+      reflections: rows.map((r) => ({
+        id: String(r.id),
+        symbol: r.symbol,
+        timeframe: r.timeframe,
+        side: r.side,
+        entryPrice: r.entryPrice,
+        exitPrice: r.exitPrice,
+        exitReason: r.exitReason,
+        pnl: r.pnl,
+        pnlPercent: r.pnlPercent,
+        holdSeconds: r.holdSeconds,
+        originalConfidence: r.originalConfidence,
+        originalExpectedMovePercent: r.originalExpectedMovePercent,
+        originalReasoning: r.originalReasoning,
+        bullishCount: r.bullishCount,
+        bearishCount: r.bearishCount,
+        lessonText: r.lessonText,
+        timestamp: r.createdAt.getTime(),
+      })),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get reflections");
+    res.status(500).json({ error: "Failed to get reflections" });
   }
 });
 

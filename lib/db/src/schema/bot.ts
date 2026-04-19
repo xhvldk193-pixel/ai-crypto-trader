@@ -102,3 +102,27 @@ export const aiSignalsTable = pgTable("ai_signals", {
 export const insertAiSignalSchema = createInsertSchema(aiSignalsTable).omit({ id: true, createdAt: true });
 export type InsertAiSignal = z.infer<typeof insertAiSignalSchema>;
 export type AiSignal = typeof aiSignalsTable.$inferSelect;
+
+export const tradeReflectionsTable = pgTable("trade_reflections", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull(),
+  timeframe: text("timeframe"),
+  side: text("side").notNull(),
+  entryPrice: real("entry_price").notNull(),
+  exitPrice: real("exit_price").notNull(),
+  exitReason: text("exit_reason").notNull(),
+  pnl: real("pnl").notNull(),
+  pnlPercent: real("pnl_percent").notNull(),
+  holdSeconds: integer("hold_seconds").notNull().default(0),
+  originalConfidence: real("original_confidence"),
+  originalExpectedMovePercent: real("original_expected_move_percent"),
+  originalReasoning: text("original_reasoning"),
+  bullishCount: integer("bullish_count").notNull().default(0),
+  bearishCount: integer("bearish_count").notNull().default(0),
+  lessonText: text("lesson_text"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertTradeReflectionSchema = createInsertSchema(tradeReflectionsTable).omit({ id: true, createdAt: true });
+export type InsertTradeReflection = z.infer<typeof insertTradeReflectionSchema>;
+export type TradeReflection = typeof tradeReflectionsTable.$inferSelect;

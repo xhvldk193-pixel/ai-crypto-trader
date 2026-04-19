@@ -31,6 +31,8 @@ import type {
   GetActivePositions200,
   GetBotLogs200,
   GetBotLogsParams,
+  GetBotReflections200,
+  GetBotReflectionsParams,
   GetLatestAiSignal200,
   GetLatestAiSignalsBySymbol200,
   GetMarketOhlcv200,
@@ -1896,6 +1898,103 @@ export const useRunBacktest = <
 > => {
   return useMutation(getRunBacktestMutationOptions(options));
 };
+
+/**
+ * @summary Get recent AI trade reflections (post-mortem learning notes)
+ */
+export const getGetBotReflectionsUrl = (params?: GetBotReflectionsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/bot/reflections?${stringifiedParams}`
+    : `/api/bot/reflections`;
+};
+
+export const getBotReflections = async (
+  params?: GetBotReflectionsParams,
+  options?: RequestInit,
+): Promise<GetBotReflections200> => {
+  return customFetch<GetBotReflections200>(getGetBotReflectionsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBotReflectionsQueryKey = (
+  params?: GetBotReflectionsParams,
+) => {
+  return [`/api/bot/reflections`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetBotReflectionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBotReflections>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetBotReflectionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBotReflections>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBotReflectionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBotReflections>>
+  > = ({ signal }) => getBotReflections(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBotReflections>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBotReflectionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBotReflections>>
+>;
+export type GetBotReflectionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get recent AI trade reflections (post-mortem learning notes)
+ */
+
+export function useGetBotReflections<
+  TData = Awaited<ReturnType<typeof getBotReflections>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetBotReflectionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBotReflections>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBotReflectionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Get recent bot activity logs

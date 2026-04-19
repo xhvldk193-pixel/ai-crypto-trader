@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useGetBotStatus, useGetBotConfig, useUpdateBotConfig, useStartBot, useStopBot, useGetBotLogs, useGetMarketSymbols } from "@workspace/api-client-react";
+import { useGetBotStatus, useGetBotConfig, useUpdateBotConfig, useStartBot, useStopBot, useGetBotLogs, useGetMarketSymbols, useGetBotReflections } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -46,6 +46,7 @@ export default function BotControl() {
   const { data: status, refetch: refetchStatus } = useGetBotStatus({ query: { refetchInterval: 5000 } as never });
   const { data: config, isLoading: isConfigLoading } = useGetBotConfig();
   const { data: logsData } = useGetBotLogs({ limit: 20 }, { query: { refetchInterval: 5000 } as never });
+  const { data: reflectionsData } = useGetBotReflections({ limit: 12 }, { query: { refetchInterval: 15000 } as never });
 
   const updateConfig = useUpdateBotConfig();
   const startBotMutation = useStartBot();
@@ -499,6 +500,70 @@ export default function BotControl() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>AI 자가 학습 — 최근 거래 복기 노트</CardTitle>
+          <CardDescription>
+            TP/SL 청산이 일어날 때마다 Claude가 결과를 복기하여 핵심 교훈을 작성하고, 이 노트들은 다음 매매 판단의 컨텍스트로 자동 주입됩니다.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!reflectionsData?.reflections || reflectionsData.reflections.length === 0 ? (
+            <div className="text-sm text-muted-foreground py-6 text-center">
+              아직 복기 데이터가 없습니다. 첫 TP/SL 청산이 일어나면 여기에 표시됩니다.
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+              {reflectionsData.reflections.map((r) => {
+                const isWin = r.exitReason === "TP";
+                const pnlColor = r.pnlPercent >= 0 ? "text-green-500" : "text-red-500";
+                const holdMin = Math.floor(r.holdSeconds / 60);
+                return (
+                  <div key={r.id} className="border border-border rounded-md p-3 bg-card/50">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <Badge variant={isWin ? "default" : "destructive"} className={isWin ? "bg-green-600 hover:bg-green-700" : ""}>
+                        {isWin ? "✓ 익절 (TP)" : r.exitReason === "SL" ? "✗ 손절 (SL)" : r.exitReason}
+                      </Badge>
+                      <Badge variant="outline">{r.symbol}</Badge>
+                      <Badge variant="outline" className="uppercase">{r.side}</Badge>
+                      <span className={`font-mono text-sm font-bold ${pnlColor}`}>
+                        {r.pnlPercent >= 0 ? "+" : ""}{r.pnlPercent.toFixed(2)}%
+                      </span>
+                      <span className="text-xs text-muted-foreground font-mono">
+                        ${r.entryPrice.toFixed(4)} → ${r.exitPrice.toFixed(4)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">보유 {holdMin}분</span>
+                      <span className="text-xs text-muted-foreground">
+                        강세 {r.bullishCount} / 약세 {r.bearishCount}
+                      </span>
+                      {typeof r.originalConfidence === "number" && (
+                        <span className="text-xs text-muted-foreground">
+                          진입 신뢰도 {(r.originalConfidence * 100).toFixed(0)}%
+                        </span>
+                      )}
+                      <span className="ml-auto text-xs text-muted-foreground">{formatDate(r.timestamp)}</span>
+                    </div>
+                    {r.lessonText ? (
+                      <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                        💡 {r.lessonText}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">복기 노트 생성 중...</p>
+                    )}
+                    {r.originalReasoning && (
+                      <details className="mt-2 text-xs text-muted-foreground">
+                        <summary className="cursor-pointer hover:text-foreground">진입 당시 AI 근거 보기</summary>
+                        <p className="mt-1 pl-2 border-l-2 border-border whitespace-pre-wrap">{r.originalReasoning}</p>
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

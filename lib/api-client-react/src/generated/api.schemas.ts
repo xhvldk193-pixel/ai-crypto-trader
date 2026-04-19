@@ -350,6 +350,26 @@ export interface BotLog {
   timestamp: number;
 }
 
+export interface TradeReflection {
+  id: string;
+  symbol: string;
+  timeframe?: string | null;
+  side: string;
+  entryPrice: number;
+  exitPrice: number;
+  exitReason: string;
+  pnl: number;
+  pnlPercent: number;
+  holdSeconds: number;
+  originalConfidence?: number | null;
+  originalExpectedMovePercent?: number | null;
+  originalReasoning?: string | null;
+  bullishCount: number;
+  bearishCount: number;
+  lessonText?: string | null;
+  timestamp: number;
+}
+
 export type BacktestRequestTimeframe =
   (typeof BacktestRequestTimeframe)[keyof typeof BacktestRequestTimeframe];
 
@@ -545,6 +565,18 @@ export type DeleteOrderParams = {
 
 export type DeleteOrder200 = {
   success: boolean;
+};
+
+export type GetBotReflectionsParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type GetBotReflections200 = {
+  reflections?: TradeReflection[];
 };
 
 export type GetBotLogsParams = {
