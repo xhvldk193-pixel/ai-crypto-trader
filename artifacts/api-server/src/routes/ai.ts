@@ -86,7 +86,9 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
     if (!content) throw new Error("Empty response from AI");
 
     const parsed = JSON.parse(content);
-    const action = (parsed.action as string) || "HOLD";
+    const rawAction = String(parsed.action ?? "HOLD").toUpperCase();
+    const action: "BUY" | "SELL" | "HOLD" =
+      rawAction === "BUY" || rawAction === "SELL" ? rawAction : "HOLD";
     const confidence = Math.min(1, Math.max(0, Number(parsed.confidence) || 0.5));
     const entryPrice = Number(parsed.suggestedEntryPrice) || Number(currentPrice);
     let expectedMovePercent = Number.isFinite(parsed.expectedMovePercent) ? Number(parsed.expectedMovePercent) : 0;
