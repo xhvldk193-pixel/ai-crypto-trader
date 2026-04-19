@@ -377,6 +377,28 @@ paths:
                       $ref: "#/components/schemas/TradeRecord"
                 required: [trades]
 
+  /portfolio/pnl-timeseries:
+    get:
+      operationId: getPnlTimeseries
+      tags: [portfolio]
+      summary: Cumulative PnL and per-day winrate timeseries
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 180
+            default: 30
+      responses:
+        "200":
+          description: PnL timeseries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PnlTimeseries"
+
   /portfolio/summary:
     get:
       operationId: getPortfolioSummary
@@ -500,6 +522,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BotStatus"
+
+  /bot/sync-positions:
+    post:
+      operationId: syncPositions
+      tags: [bot]
+      summary: Reconcile DB-tracked positions with live exchange positions
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncPositionsResult"
 
   /bot/config:
     get:
@@ -982,6 +1017,50 @@ components:
           type: boolean
       required: [running, totalSignals, executedTrades, dailyPnlUsd, dailyPnlPercent, halted]
 
+    PnlTimeseries:
+      type: object
+      properties:
+        cumulative:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: number
+              cumulativePnl:
+                type: number
+              tradePnl:
+                type: number
+            required: [timestamp, cumulativePnl, tradePnl]
+        daily:
+          type: array
+          items:
+            type: object
+            properties:
+              timestamp:
+                type: number
+              pnl:
+                type: number
+              trades:
+                type: integer
+              winRate:
+                type: number
+            required: [timestamp, pnl, trades, winRate]
+      required: [cumulative, daily]
+
+    SyncPositionsResult:
+      type: object
+      properties:
+        added:
+          type: integer
+        removed:
+          type: integer
+        details:
+          type: array
+          items:
+            type: string
+      required: [added, removed, details]
+
     BotConfig:
       type: object
       properties:
@@ -1030,7 +1109,24 @@ components:
           description: Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT").
           additionalProperties:
             $ref: "#/components/schemas/SymbolOverride"
-      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides]
+        leverage:
+          type: integer
+        marginType:
+          type: string
+          enum: ["ISOLATED", "CROSSED"]
+        notifyOnError:
+          type: boolean
+        useTrailingStop:
+          type: boolean
+        trailingActivatePercent:
+          type: number
+        trailingDistancePercent:
+          type: number
+        usePartialTp:
+          type: boolean
+        partialTpPercent:
+          type: number
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides, leverage, marginType, notifyOnError, useTrailingStop, trailingActivatePercent, trailingDistancePercent, usePartialTp, partialTpPercent]
 
     BotConfigUpdate:
       type: object
@@ -1079,6 +1175,23 @@ components:
           type: object
           additionalProperties:
             $ref: "#/components/schemas/SymbolOverride"
+        leverage:
+          type: integer
+        marginType:
+          type: string
+          enum: ["ISOLATED", "CROSSED"]
+        notifyOnError:
+          type: boolean
+        useTrailingStop:
+          type: boolean
+        trailingActivatePercent:
+          type: number
+        trailingDistancePercent:
+          type: number
+        usePartialTp:
+          type: boolean
+        partialTpPercent:
+          type: number
 
     SymbolOverride:
       type: object

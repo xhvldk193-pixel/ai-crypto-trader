@@ -39,3 +39,25 @@ export async function sendOwnerMessage(text: string): Promise<void> {
     clearTimeout(timeout);
   }
 }
+
+const alertDebounceMap = new Map<string, number>();
+const ALERT_DEBOUNCE_MS = 5 * 60 * 1000;
+
+export async function notifyAlert(
+  level: "error" | "warning" | "info",
+  message: string,
+  dedupeKey?: string,
+): Promise<void> {
+  if (!telegramConfigured) return;
+  const key = dedupeKey ?? message.slice(0, 80);
+  const now = Date.now();
+  const last = alertDebounceMap.get(key);
+  if (last && now - last < ALERT_DEBOUNCE_MS) return;
+  alertDebounceMap.set(key, now);
+  const icon = level === "error" ? "🚨" : level === "warning" ? "⚠️" : "ℹ️";
+  try {
+    await sendOwnerMessage(`${icon} [${level.toUpperCase()}] ${message}`);
+  } catch (err) {
+    logger.warn({ err }, "Failed to send Telegram alert");
+  }
+}

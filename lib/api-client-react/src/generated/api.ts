@@ -42,6 +42,7 @@ import type {
   GetMarketTickerParams,
   GetOpenOrders200,
   GetOpenOrdersParams,
+  GetPnlTimeseriesParams,
   GetPortfolioHistory200,
   GetPortfolioHistoryParams,
   GetPortfolioPositions200,
@@ -50,8 +51,10 @@ import type {
   LoginBody,
   Order,
   PlaceOrderRequest,
+  PnlTimeseries,
   PortfolioBalance,
   PortfolioSummary,
+  SyncPositionsResult,
   Ticker,
   VerifyTwoFactor401,
   VerifyTwoFactorBody,
@@ -1396,6 +1399,106 @@ export function useGetPortfolioHistory<
 }
 
 /**
+ * @summary Cumulative PnL and per-day winrate timeseries
+ */
+export const getGetPnlTimeseriesUrl = (params?: GetPnlTimeseriesParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/portfolio/pnl-timeseries?${stringifiedParams}`
+    : `/api/portfolio/pnl-timeseries`;
+};
+
+export const getPnlTimeseries = async (
+  params?: GetPnlTimeseriesParams,
+  options?: RequestInit,
+): Promise<PnlTimeseries> => {
+  return customFetch<PnlTimeseries>(getGetPnlTimeseriesUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPnlTimeseriesQueryKey = (
+  params?: GetPnlTimeseriesParams,
+) => {
+  return [
+    `/api/portfolio/pnl-timeseries`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetPnlTimeseriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPnlTimeseries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetPnlTimeseriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPnlTimeseries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPnlTimeseriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPnlTimeseries>>
+  > = ({ signal }) => getPnlTimeseries(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPnlTimeseries>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPnlTimeseriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPnlTimeseries>>
+>;
+export type GetPnlTimeseriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Cumulative PnL and per-day winrate timeseries
+ */
+
+export function useGetPnlTimeseries<
+  TData = Awaited<ReturnType<typeof getPnlTimeseries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetPnlTimeseriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPnlTimeseries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPnlTimeseriesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * @summary Get portfolio summary with PnL
  */
 export const getGetPortfolioSummaryUrl = () => {
@@ -1981,6 +2084,87 @@ export const useStopBot = <
   TContext
 > => {
   return useMutation(getStopBotMutationOptions(options));
+};
+
+/**
+ * @summary Reconcile DB-tracked positions with live exchange positions
+ */
+export const getSyncPositionsUrl = () => {
+  return `/api/bot/sync-positions`;
+};
+
+export const syncPositions = async (
+  options?: RequestInit,
+): Promise<SyncPositionsResult> => {
+  return customFetch<SyncPositionsResult>(getSyncPositionsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSyncPositionsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncPositions>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof syncPositions>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["syncPositions"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof syncPositions>>,
+    void
+  > = () => {
+    return syncPositions(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SyncPositionsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof syncPositions>>
+>;
+
+export type SyncPositionsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reconcile DB-tracked positions with live exchange positions
+ */
+export const useSyncPositions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncPositions>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof syncPositions>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getSyncPositionsMutationOptions(options));
 };
 
 /**

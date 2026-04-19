@@ -6,6 +6,7 @@ import { analyzeDivergences } from "./divergence";
 import { computeAtrPercent } from "./indicators";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
+import { notifyAlert } from "./telegram";
 
 const ANTHROPIC_MODEL = "claude-opus-4-7";
 
@@ -247,10 +248,84 @@ class BotManager {
       });
     } catch (err) {
       logger.error({ err }, "Bot tick error");
-      await this.addLog("error", `봇 틱 오류: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.addLog("error", `봇 틱 오류: ${msg}`).catch(() => {});
+      await this.maybeNotify("error", `봇 틱 오류: ${msg}`, "tick-error");
     } finally {
       this.tickInFlight = false;
     }
+  }
+
+  private async maybeNotify(level: "error" | "warning" | "info", message: string, key?: string) {
+    try {
+      const cfg = await this.getConfig();
+      if (cfg.notifyOnError) await notifyAlert(level, message, key);
+    } catch { /* best-effort */ }
+  }
+
+  /** Reconcile DB-tracked active positions with what's actually on the exchange. */
+  async syncWithExchange(): Promise<{ added: number; removed: number; details: string[] }> {
+    const details: string[] = [];
+    let added = 0, removed = 0;
+    let exchangePositions;
+    try {
+      exchangePositions = await exchangeService.getPositions();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`거래소 포지션 조회 실패: ${msg}`);
+    }
+    const dbPositions = await db.select().from(activePositionsTable);
+
+    // Normalize exchange symbol (BTCUSDT) to slash form (BTC/USDT) using DB hint or heuristic
+    const normalize = (s: string): string => {
+      if (s.includes("/")) return s;
+      if (s.endsWith("USDT")) return `${s.slice(0, -4)}/USDT`;
+      return s;
+    };
+    const exMap = new Map<string, typeof exchangePositions[number]>();
+    for (const ex of exchangePositions) exMap.set(`${normalize(ex.symbol)}|${ex.side}`, ex);
+
+    // 1) Remove DB rows that have no on-exchange position
+    for (const dbPos of dbPositions) {
+      const k = `${dbPos.symbol}|${dbPos.side}`;
+      if (!exMap.has(k)) {
+        await db.delete(activePositionsTable).where(eq(activePositionsTable.id, dbPos.id));
+        removed++;
+        details.push(`DB→정리: ${dbPos.symbol} ${dbPos.side}`);
+      }
+    }
+
+    // 2) Add exchange positions missing in DB (use exchange's TP/SL = 2x mark from entry as placeholder)
+    const dbKeys = new Set(dbPositions.map((p) => `${p.symbol}|${p.side}`));
+    for (const ex of exchangePositions) {
+      const sym = normalize(ex.symbol);
+      const k = `${sym}|${ex.side}`;
+      if (!dbKeys.has(k)) {
+        const dir = ex.side === "long" ? 1 : -1;
+        const placeholderTp = ex.entryPrice * (1 + dir * 0.02);
+        const placeholderSl = ex.entryPrice * (1 - dir * 0.01);
+        try {
+          await db.insert(activePositionsTable).values({
+            symbol: sym,
+            side: ex.side,
+            entryPrice: ex.entryPrice,
+            quantity: ex.quantity,
+            takeProfit: placeholderTp,
+            stopLoss: placeholderSl,
+            triggeredBy: "sync",
+          });
+          added++;
+          details.push(`DB←추가: ${sym} ${ex.side} qty=${ex.quantity} entry=$${ex.entryPrice.toFixed(2)} (TP/SL 임시값)`);
+        } catch (err) {
+          details.push(`추가 실패 ${sym}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    if (added > 0 || removed > 0) {
+      await this.addLog("info", `거래소↔DB 동기화: +${added} / -${removed}`).catch(() => {});
+    }
+    return { added, removed, details };
   }
 
   private async getMtfBias(symbol: string, timeframes: string[]): Promise<Record<string, string>> {
@@ -467,7 +542,9 @@ class BotManager {
         );
       } catch (err) {
         await db.delete(activePositionsTable).where(eq(activePositionsTable.symbol, symbol)).catch(() => {});
-        await this.addLog("error", `거래 실행 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`, symbol);
+        const msg = err instanceof Error ? err.message : String(err);
+        await this.addLog("error", `거래 실행 실패 (${symbol}): ${msg}`, symbol);
+        await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, `entry-fail-${symbol}`);
       }
     }
   }
@@ -535,6 +612,8 @@ class BotManager {
     const positions = await db.select().from(activePositionsTable);
     if (positions.length === 0) return;
 
+    const config = await this.getConfig();
+
     await Promise.allSettled(positions.map(async (pos) => {
       let price: number;
       try {
@@ -545,6 +624,92 @@ class BotManager {
       }
 
       const isLong = pos.side === "long";
+
+      // ─── Trailing stop: update SL when high-water-mark improves ────────
+      if (config.useTrailingStop) {
+        const moveFromEntryPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+        const activate = config.trailingActivatePercent ?? 1.0;
+        const distance = config.trailingDistancePercent ?? 0.5;
+        if (moveFromEntryPct >= activate) {
+          const hwm = pos.highWaterMark ?? pos.entryPrice;
+          const newHwm = isLong ? Math.max(hwm, price) : Math.min(hwm, price);
+          const newSl = isLong
+            ? newHwm * (1 - distance / 100)
+            : newHwm * (1 + distance / 100);
+          const slImproved = isLong ? newSl > pos.stopLoss : newSl < pos.stopLoss;
+          if (newHwm !== hwm || slImproved) {
+            await db.update(activePositionsTable).set({
+              highWaterMark: newHwm,
+              ...(slImproved ? { stopLoss: newSl } : {}),
+            }).where(eq(activePositionsTable.id, pos.id));
+            if (slImproved) {
+              pos.stopLoss = newSl;
+              await this.addLog(
+                "info",
+                `${pos.symbol} 트레일링 SL 업데이트 → $${newSl.toFixed(4)} (HWM $${newHwm.toFixed(4)})`,
+                pos.symbol,
+              );
+            }
+          }
+        }
+      }
+
+      // ─── Partial TP: close half (or configured %) once price moves halfway to TP ──
+      if (config.usePartialTp && !pos.partialTpDone) {
+        const halfTarget = pos.entryPrice + (pos.takeProfit - pos.entryPrice) * 0.5;
+        const halfHit = isLong ? price >= halfTarget : price <= halfTarget;
+        if (halfHit) {
+          try {
+            const positionSide = isLong ? "LONG" : "SHORT";
+            let actualQty = pos.quantity;
+            try {
+              const onEx = await exchangeService.getPositionAmount(pos.symbol, positionSide);
+              if (onEx > 0) actualQty = onEx;
+            } catch { /* fall back to DB */ }
+            const partPct = (config.partialTpPercent ?? 50) / 100;
+            const closeQty = actualQty * partPct;
+            if (closeQty > 0) {
+              await exchangeService.placeOrder(
+                pos.symbol,
+                isLong ? "sell" : "buy",
+                "market",
+                closeQty,
+                undefined,
+                { positionSide, reduceOnly: true },
+              );
+              const realized = (price - pos.entryPrice) * closeQty * (isLong ? 1 : -1);
+              await db.insert(tradeHistoryTable).values({
+                symbol: pos.symbol,
+                side: isLong ? "sell" : "buy",
+                price,
+                quantity: closeQty,
+                total: price * closeQty,
+                fee: price * closeQty * 0.001,
+                pnl: realized,
+                triggeredBy: "bot",
+              });
+              // Move SL to breakeven (entry) and mark partial done
+              await db.update(activePositionsTable).set({
+                quantity: actualQty - closeQty,
+                stopLoss: pos.entryPrice,
+                partialTpDone: true,
+              }).where(eq(activePositionsTable.id, pos.id));
+              pos.stopLoss = pos.entryPrice;
+              pos.quantity = actualQty - closeQty;
+              await this.addLog(
+                "trade",
+                `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)})`,
+                pos.symbol,
+              );
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await this.addLog("error", `부분 익절 실패 (${pos.symbol}): ${msg}`, pos.symbol);
+            await this.maybeNotify("error", `부분 익절 실패 (${pos.symbol}): ${msg}`, `partial-tp-fail-${pos.symbol}`);
+          }
+        }
+      }
+
       const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
 
@@ -663,7 +828,9 @@ class BotManager {
           }).catch((err) => logger.warn({ err, id: reflectionRow.id }, "Reflection lesson generation failed"));
         }
       } catch (err) {
-        await this.addLog("error", `포지션 청산 실패 (${pos.symbol}): ${err instanceof Error ? err.message : String(err)}`, pos.symbol);
+        const msg = err instanceof Error ? err.message : String(err);
+        await this.addLog("error", `포지션 청산 실패 (${pos.symbol}): ${msg}`, pos.symbol);
+        await this.maybeNotify("error", `청산 실패 (${pos.symbol}): ${msg}`, `close-fail-${pos.symbol}`);
       }
     }));
   }

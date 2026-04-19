@@ -21,6 +21,17 @@ router.post("/stop", async (_req, res) => {
   res.json(botManager.getStatus());
 });
 
+router.post("/sync-positions", async (req, res) => {
+  try {
+    const result = await botManager.syncWithExchange();
+    res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "Failed to sync positions");
+    const msg = err instanceof Error ? err.message : "Failed to sync positions";
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.get("/config", async (req, res) => {
   try {
     const rows = await db.select().from(botConfigTable).limit(1);
@@ -76,6 +87,21 @@ router.put("/config", async (req, res) => {
     if (body.marginType !== undefined) {
       const mt = String(body.marginType).toUpperCase();
       if (mt === "ISOLATED" || mt === "CROSSED") updateData.marginType = mt;
+    }
+    if (body.notifyOnError !== undefined) updateData.notifyOnError = Boolean(body.notifyOnError);
+    if (body.useTrailingStop !== undefined) updateData.useTrailingStop = Boolean(body.useTrailingStop);
+    if (body.trailingActivatePercent !== undefined) {
+      const v = Number(body.trailingActivatePercent);
+      if (Number.isFinite(v) && v > 0 && v <= 50) updateData.trailingActivatePercent = v;
+    }
+    if (body.trailingDistancePercent !== undefined) {
+      const v = Number(body.trailingDistancePercent);
+      if (Number.isFinite(v) && v > 0 && v <= 50) updateData.trailingDistancePercent = v;
+    }
+    if (body.usePartialTp !== undefined) updateData.usePartialTp = Boolean(body.usePartialTp);
+    if (body.partialTpPercent !== undefined) {
+      const v = Number(body.partialTpPercent);
+      if (Number.isFinite(v) && v >= 10 && v <= 90) updateData.partialTpPercent = v;
     }
     updateData.updatedAt = new Date();
 
@@ -191,6 +217,12 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     symbolOverrides: (row.symbolOverrides as Record<string, Record<string, number>>) ?? {},
     leverage: row.leverage,
     marginType: row.marginType,
+    notifyOnError: row.notifyOnError,
+    useTrailingStop: row.useTrailingStop,
+    trailingActivatePercent: row.trailingActivatePercent,
+    trailingDistancePercent: row.trailingDistancePercent,
+    usePartialTp: row.usePartialTp,
+    partialTpPercent: row.partialTpPercent,
   };
 }
 

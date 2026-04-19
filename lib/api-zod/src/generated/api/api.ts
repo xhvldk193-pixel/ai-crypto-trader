@@ -375,6 +375,38 @@ export const GetPortfolioHistoryResponse = zod.object({
 });
 
 /**
+ * @summary Cumulative PnL and per-day winrate timeseries
+ */
+export const getPnlTimeseriesQueryDaysDefault = 30;
+export const getPnlTimeseriesQueryDaysMax = 180;
+
+export const GetPnlTimeseriesQueryParams = zod.object({
+  days: zod.coerce
+    .number()
+    .min(1)
+    .max(getPnlTimeseriesQueryDaysMax)
+    .default(getPnlTimeseriesQueryDaysDefault),
+});
+
+export const GetPnlTimeseriesResponse = zod.object({
+  cumulative: zod.array(
+    zod.object({
+      timestamp: zod.number(),
+      cumulativePnl: zod.number(),
+      tradePnl: zod.number(),
+    }),
+  ),
+  daily: zod.array(
+    zod.object({
+      timestamp: zod.number(),
+      pnl: zod.number(),
+      trades: zod.number(),
+      winRate: zod.number(),
+    }),
+  ),
+});
+
+/**
  * @summary Get portfolio summary with PnL
  */
 export const GetPortfolioSummaryResponse = zod.object({
@@ -503,6 +535,15 @@ export const StopBotResponse = zod.object({
 });
 
 /**
+ * @summary Reconcile DB-tracked positions with live exchange positions
+ */
+export const SyncPositionsResponse = zod.object({
+  added: zod.number(),
+  removed: zod.number(),
+  details: zod.array(zod.string()),
+});
+
+/**
  * @summary Get bot configuration
  */
 export const GetBotConfigResponse = zod.object({
@@ -540,6 +581,14 @@ export const GetBotConfigResponse = zod.object({
     .describe(
       'Per-symbol parameter overrides keyed by symbol (e.g. \"BTC\/USDT\").',
     ),
+  leverage: zod.number(),
+  marginType: zod.enum(["ISOLATED", "CROSSED"]),
+  notifyOnError: zod.boolean(),
+  useTrailingStop: zod.boolean(),
+  trailingActivatePercent: zod.number(),
+  trailingDistancePercent: zod.number(),
+  usePartialTp: zod.boolean(),
+  partialTpPercent: zod.number(),
 });
 
 /**
@@ -578,6 +627,14 @@ export const UpdateBotConfigBody = zod.object({
         ),
     )
     .optional(),
+  leverage: zod.number().optional(),
+  marginType: zod.enum(["ISOLATED", "CROSSED"]).optional(),
+  notifyOnError: zod.boolean().optional(),
+  useTrailingStop: zod.boolean().optional(),
+  trailingActivatePercent: zod.number().optional(),
+  trailingDistancePercent: zod.number().optional(),
+  usePartialTp: zod.boolean().optional(),
+  partialTpPercent: zod.number().optional(),
 });
 
 export const UpdateBotConfigResponse = zod.object({
@@ -615,6 +672,14 @@ export const UpdateBotConfigResponse = zod.object({
     .describe(
       'Per-symbol parameter overrides keyed by symbol (e.g. \"BTC\/USDT\").',
     ),
+  leverage: zod.number(),
+  marginType: zod.enum(["ISOLATED", "CROSSED"]),
+  notifyOnError: zod.boolean(),
+  useTrailingStop: zod.boolean(),
+  trailingActivatePercent: zod.number(),
+  trailingDistancePercent: zod.number(),
+  usePartialTp: zod.boolean(),
+  partialTpPercent: zod.number(),
 });
 
 /**

@@ -88,6 +88,48 @@ router.get("/history", async (req, res) => {
   }
 });
 
+router.get("/pnl-timeseries", async (req, res) => {
+  const days = Math.min(parseInt((req.query.days as string) || "30", 10), 180);
+  try {
+    const sinceMs = Date.now() - days * 86400000;
+    const trades = await db.select().from(tradeHistoryTable).orderBy(tradeHistoryTable.createdAt);
+    const filtered = trades.filter((t) => t.createdAt.getTime() >= sinceMs && (t.pnl ?? 0) !== 0);
+
+    // Cumulative PnL points (one per realized trade)
+    let cum = 0;
+    const cumulative = filtered.map((t) => {
+      cum += t.pnl ?? 0;
+      return { timestamp: t.createdAt.getTime(), cumulativePnl: cum, tradePnl: t.pnl ?? 0 };
+    });
+
+    // Daily aggregation: pnl, wins, total trades → win rate
+    const dayMap = new Map<string, { pnl: number; wins: number; total: number; ts: number }>();
+    for (const t of filtered) {
+      const d = new Date(t.createdAt);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      const ts = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+      const cur = dayMap.get(key) ?? { pnl: 0, wins: 0, total: 0, ts };
+      cur.pnl += t.pnl ?? 0;
+      cur.total += 1;
+      if ((t.pnl ?? 0) > 0) cur.wins += 1;
+      dayMap.set(key, cur);
+    }
+    const daily = Array.from(dayMap.values())
+      .sort((a, b) => a.ts - b.ts)
+      .map((d) => ({
+        timestamp: d.ts,
+        pnl: d.pnl,
+        trades: d.total,
+        winRate: d.total > 0 ? d.wins / d.total : 0,
+      }));
+
+    res.json({ cumulative, daily });
+  } catch (err) {
+    req.log.error({ err }, "Failed to compute PnL timeseries");
+    res.status(500).json({ error: "Failed to compute PnL timeseries" });
+  }
+});
+
 router.get("/summary", async (req, res) => {
   try {
     const balance = await exchangeService.getBalance();

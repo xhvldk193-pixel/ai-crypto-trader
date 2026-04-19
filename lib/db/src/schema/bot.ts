@@ -31,6 +31,12 @@ export const botConfigTable = pgTable("bot_config", {
   symbolOverrides: jsonb("symbol_overrides").$type<Record<string, SymbolOverride>>().notNull().default({}),
   leverage: integer("leverage").notNull().default(10),
   marginType: text("margin_type").notNull().default("ISOLATED"),
+  notifyOnError: boolean("notify_on_error").notNull().default(true),
+  useTrailingStop: boolean("use_trailing_stop").notNull().default(false),
+  trailingActivatePercent: real("trailing_activate_percent").notNull().default(1.0),
+  trailingDistancePercent: real("trailing_distance_percent").notNull().default(0.5),
+  usePartialTp: boolean("use_partial_tp").notNull().default(false),
+  partialTpPercent: real("partial_tp_percent").notNull().default(50.0),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -81,6 +87,8 @@ export const activePositionsTable = pgTable("active_positions", {
   aiConfidence: real("ai_confidence"),
   aiReasoning: text("ai_reasoning"),
   triggeredBy: text("triggered_by").notNull().default("bot"),
+  highWaterMark: real("high_water_mark"),
+  partialTpDone: boolean("partial_tp_done").notNull().default(false),
   openedAt: timestamp("opened_at").defaultNow().notNull(),
 }, (table) => ({
   symbolUnique: uniqueIndex("active_positions_symbol_unique").on(table.symbol),

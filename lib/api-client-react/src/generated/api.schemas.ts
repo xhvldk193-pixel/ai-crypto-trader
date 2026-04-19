@@ -292,6 +292,30 @@ export interface BotStatus {
   halted: boolean;
 }
 
+export type PnlTimeseriesCumulativeItem = {
+  timestamp: number;
+  cumulativePnl: number;
+  tradePnl: number;
+};
+
+export type PnlTimeseriesDailyItem = {
+  timestamp: number;
+  pnl: number;
+  trades: number;
+  winRate: number;
+};
+
+export interface PnlTimeseries {
+  cumulative: PnlTimeseriesCumulativeItem[];
+  daily: PnlTimeseriesDailyItem[];
+}
+
+export interface SyncPositionsResult {
+  added: number;
+  removed: number;
+  details: string[];
+}
+
 /**
  * Optional per-symbol overrides. Omitted/null fields fall back to the global bot config.
  */
@@ -310,6 +334,14 @@ export interface SymbolOverride {
  * Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT").
  */
 export type BotConfigSymbolOverrides = { [key: string]: SymbolOverride };
+
+export type BotConfigMarginType =
+  (typeof BotConfigMarginType)[keyof typeof BotConfigMarginType];
+
+export const BotConfigMarginType = {
+  ISOLATED: "ISOLATED",
+  CROSSED: "CROSSED",
+} as const;
 
 export interface BotConfig {
   symbol: string;
@@ -331,9 +363,25 @@ export interface BotConfig {
   useFundingRate: boolean;
   /** Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT"). */
   symbolOverrides: BotConfigSymbolOverrides;
+  leverage: number;
+  marginType: BotConfigMarginType;
+  notifyOnError: boolean;
+  useTrailingStop: boolean;
+  trailingActivatePercent: number;
+  trailingDistancePercent: number;
+  usePartialTp: boolean;
+  partialTpPercent: number;
 }
 
 export type BotConfigUpdateSymbolOverrides = { [key: string]: SymbolOverride };
+
+export type BotConfigUpdateMarginType =
+  (typeof BotConfigUpdateMarginType)[keyof typeof BotConfigUpdateMarginType];
+
+export const BotConfigUpdateMarginType = {
+  ISOLATED: "ISOLATED",
+  CROSSED: "CROSSED",
+} as const;
 
 export interface BotConfigUpdate {
   symbol?: string;
@@ -354,6 +402,14 @@ export interface BotConfigUpdate {
   mtfTimeframes?: string[];
   useFundingRate?: boolean;
   symbolOverrides?: BotConfigUpdateSymbolOverrides;
+  leverage?: number;
+  marginType?: BotConfigUpdateMarginType;
+  notifyOnError?: boolean;
+  useTrailingStop?: boolean;
+  trailingActivatePercent?: number;
+  trailingDistancePercent?: number;
+  usePartialTp?: boolean;
+  partialTpPercent?: number;
 }
 
 export interface AuthStatus {
@@ -600,6 +656,14 @@ export type GetPortfolioHistoryParams = {
 
 export type GetPortfolioHistory200 = {
   trades: TradeRecord[];
+};
+
+export type GetPnlTimeseriesParams = {
+  /**
+   * @minimum 1
+   * @maximum 180
+   */
+  days?: number;
 };
 
 export type GetOpenOrdersParams = {
