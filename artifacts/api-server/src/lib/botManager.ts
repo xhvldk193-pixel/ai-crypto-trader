@@ -552,13 +552,34 @@ class BotManager {
 
       const exitReason = tpHit ? "TP" : "SL";
       try {
+        const positionSide = isLong ? "LONG" : "SHORT";
+        // Always trust the exchange for actual quantity to avoid -2022 ReduceOnly rejections
+        let actualQty = pos.quantity;
+        try {
+          const onExchange = await exchangeService.getPositionAmount(pos.symbol, positionSide);
+          if (onExchange <= 0) {
+            // Position no longer exists on Binance (manually closed, liquidated, or never opened).
+            // Just clean up DB and skip the close order.
+            await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
+            await this.addLog(
+              "warning",
+              `${pos.symbol} ${positionSide} 거래소에 실제 포지션이 없어 DB만 정리`,
+              pos.symbol,
+            );
+            return;
+          }
+          actualQty = onExchange;
+        } catch (err) {
+          logger.warn({ err, symbol: pos.symbol }, "Failed to fetch on-exchange position; falling back to DB qty");
+        }
+
         await exchangeService.placeOrder(
           pos.symbol,
           isLong ? "sell" : "buy",
           "market",
-          pos.quantity,
+          actualQty,
           undefined,
-          { positionSide: isLong ? "LONG" : "SHORT", reduceOnly: true },
+          { positionSide, reduceOnly: true },
         );
         const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
         const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);

@@ -463,4 +463,23 @@ export const exchangeService = {
   async ensureFuturesSetup(symbol: string, leverage: number, marginType: string) {
     return ensureSymbolSetup(toBinanceSymbol(symbol), leverage, marginType);
   },
+
+  /**
+   * Fetch the actual on-exchange position size for a (symbol, positionSide) pair.
+   * Returns 0 if no position exists. Used before closing to avoid -2022 ReduceOnly rejections.
+   */
+  async getPositionAmount(symbol: string, positionSide: PositionSide): Promise<number> {
+    if (IS_DEMO) {
+      const target = positionSide === "LONG" ? "long" : "short";
+      const found = demoPositions.find((p) => p.symbol === symbol && p.side === target);
+      return found ? found.quantity : 0;
+    }
+    const s = toBinanceSymbol(symbol);
+    const data = await binanceSigned("GET", "/fapi/v2/positionRisk", { symbol: s }) as Array<{
+      symbol: string; positionAmt: string; positionSide: string;
+    }>;
+    const row = data.find((p) => p.positionSide === positionSide);
+    if (!row) return 0;
+    return Math.abs(parseFloat(row.positionAmt) || 0);
+  },
 };
