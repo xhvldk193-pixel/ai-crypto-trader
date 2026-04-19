@@ -99,6 +99,7 @@ class BotManager {
   private currentSymbols: string[] = ["BTC/USDT"];
   private currentTimeframe = "15m";
   private tickInFlight = false;
+  private tickCount = 0;
   private halted = false;
   private dailyPnlUsd = 0;
   private dailyPnlPercent = 0;
@@ -127,6 +128,13 @@ class BotManager {
     this.startTime = Date.now();
 
     await this.addLog("info", "트레이딩 봇이 시작되었습니다.");
+
+    // Reconcile DB phantoms before first tick
+    try {
+      await this.syncWithExchange("auto");
+    } catch (err) {
+      logger.warn({ err }, "Initial sync failed");
+    }
 
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
@@ -209,10 +217,9 @@ class BotManager {
 
     if (this.dailyPnlPercent <= -config.maxDailyLossPercent && !this.halted) {
       this.halted = true;
-      await this.addLog(
-        "error",
-        `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`,
-      ).catch(() => {});
+      const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
+      await this.addLog("error", msg).catch(() => {});
+      await this.maybeNotify("error", msg, "daily-loss-halt");
     }
   }
 
@@ -226,6 +233,13 @@ class BotManager {
       this.currentSymbols = symbols;
       this.currentTimeframe = config.timeframe;
       this.lastCheckedAt = Date.now();
+
+      // Periodic auto-reconcile (prune phantoms / surface untracked exchange positions)
+      this.tickCount += 1;
+      if (this.tickCount % 10 === 1) {
+        try { await this.syncWithExchange("auto"); }
+        catch (err) { logger.warn({ err }, "Periodic auto-sync failed"); }
+      }
 
       // Update daily PnL & halt state from realized trades
       await this.refreshDailyPnl(config);
@@ -263,8 +277,14 @@ class BotManager {
     } catch { /* best-effort */ }
   }
 
-  /** Reconcile DB-tracked active positions with what's actually on the exchange. */
-  async syncWithExchange(): Promise<{ added: number; removed: number; details: string[] }> {
+  /**
+   * Reconcile DB-tracked active positions with the exchange.
+   * - mode "auto" (called on bot start + every tick): only PRUNES phantoms (DB rows the exchange no longer holds).
+   *   Exchange-only positions are info-logged but NOT inserted (avoid auto-managing user manual orders).
+   * - mode "adopt" (manual sync button): also INSERTS exchange-only positions into DB so the bot will track them.
+   *   TP/SL are taken from open reduceOnly STOP/TP_MARKET orders when present, else fall back to ±2%/±1% placeholders.
+   */
+  async syncWithExchange(mode: "auto" | "adopt" = "adopt"): Promise<{ added: number; removed: number; details: string[] }> {
     const details: string[] = [];
     let added = 0, removed = 0;
     let exchangePositions;
@@ -295,30 +315,53 @@ class BotManager {
       }
     }
 
-    // 2) Add exchange positions missing in DB (use exchange's TP/SL = 2x mark from entry as placeholder)
+    // 2) Handle exchange positions missing in DB
     const dbKeys = new Set(dbPositions.map((p) => `${p.symbol}|${p.side}`));
     for (const ex of exchangePositions) {
       const sym = normalize(ex.symbol);
       const k = `${sym}|${ex.side}`;
-      if (!dbKeys.has(k)) {
-        const dir = ex.side === "long" ? 1 : -1;
-        const placeholderTp = ex.entryPrice * (1 + dir * 0.02);
-        const placeholderSl = ex.entryPrice * (1 - dir * 0.01);
-        try {
-          await db.insert(activePositionsTable).values({
-            symbol: sym,
-            side: ex.side,
-            entryPrice: ex.entryPrice,
-            quantity: ex.quantity,
-            takeProfit: placeholderTp,
-            stopLoss: placeholderSl,
-            triggeredBy: "sync",
-          });
-          added++;
-          details.push(`DB←추가: ${sym} ${ex.side} qty=${ex.quantity} entry=$${ex.entryPrice.toFixed(2)} (TP/SL 임시값)`);
-        } catch (err) {
-          details.push(`추가 실패 ${sym}: ${err instanceof Error ? err.message : String(err)}`);
+      if (dbKeys.has(k)) continue;
+
+      if (mode === "auto") {
+        // Just log — do NOT auto-track manual user orders
+        details.push(`거래소 단독 포지션 감지(미추적): ${sym} ${ex.side} qty=${ex.quantity}`);
+        await this.addLog(
+          "info",
+          `거래소에 봇이 추적하지 않는 포지션 발견: ${sym} ${ex.side} qty=${ex.quantity} (수동 동기화 버튼으로 인계 가능)`,
+          sym,
+        );
+        continue;
+      }
+
+      // adopt mode: insert into DB. Try to discover real TP/SL from open reduceOnly orders.
+      const dir = ex.side === "long" ? 1 : -1;
+      let tp = ex.entryPrice * (1 + dir * 0.02);
+      let sl = ex.entryPrice * (1 - dir * 0.01);
+      try {
+        const openOrders = await exchangeService.getOpenOrders(sym);
+        const closingSide = ex.side === "long" ? "sell" : "buy";
+        for (const o of openOrders) {
+          if (o.side?.toLowerCase() !== closingSide) continue;
+          const ot = (o.type || "").toLowerCase();
+          if (ot.includes("take_profit") && o.price > 0) tp = o.price;
+          else if (ot.includes("stop") && o.price > 0) sl = o.price;
         }
+      } catch { /* fall back to placeholders */ }
+
+      try {
+        await db.insert(activePositionsTable).values({
+          symbol: sym,
+          side: ex.side,
+          entryPrice: ex.entryPrice,
+          quantity: ex.quantity,
+          takeProfit: tp,
+          stopLoss: sl,
+          triggeredBy: "sync",
+        });
+        added++;
+        details.push(`DB←추가: ${sym} ${ex.side} qty=${ex.quantity} entry=$${ex.entryPrice.toFixed(2)} TP=$${tp.toFixed(2)} SL=$${sl.toFixed(2)}`);
+      } catch (err) {
+        details.push(`추가 실패 ${sym}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -696,11 +739,9 @@ class BotManager {
               }).where(eq(activePositionsTable.id, pos.id));
               pos.stopLoss = pos.entryPrice;
               pos.quantity = actualQty - closeQty;
-              await this.addLog(
-                "trade",
-                `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)})`,
-                pos.symbol,
-              );
+              const successMsg = `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)})`;
+              await this.addLog("trade", successMsg, pos.symbol);
+              await this.maybeNotify("info", `✅ ${successMsg}`, `partial-tp-ok-${pos.symbol}-${pos.id}`);
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

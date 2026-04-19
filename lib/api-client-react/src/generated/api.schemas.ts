@@ -305,9 +305,21 @@ export type PnlTimeseriesDailyItem = {
   winRate: number;
 };
 
+export type PnlTimeseriesKpis = {
+  totalTrades: number;
+  winRate: number;
+  avgRiskReward: number;
+  totalPnl: number;
+  bestDayPnl: number;
+  bestDayTimestamp?: number | null;
+  worstDayPnl: number;
+  worstDayTimestamp?: number | null;
+};
+
 export interface PnlTimeseries {
   cumulative: PnlTimeseriesCumulativeItem[];
   daily: PnlTimeseriesDailyItem[];
+  kpis: PnlTimeseriesKpis;
 }
 
 export interface SyncPositionsResult {

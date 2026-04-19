@@ -173,6 +173,35 @@ export default function Dashboard() {
               아직 실현된 거래 내역이 없습니다.
             </div>
           ) : (
+            <>
+            {pnlData?.kpis && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                <div className="rounded-md border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">총 거래</div>
+                  <div className="text-xl font-bold font-mono">{pnlData.kpis.totalTrades}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">전체 승률</div>
+                  <div className="text-xl font-bold font-mono">{(pnlData.kpis.winRate * 100).toFixed(1)}%</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">평균 R:R</div>
+                  <div className="text-xl font-bold font-mono">{pnlData.kpis.avgRiskReward.toFixed(2)}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">최고일</div>
+                  <div className={`text-xl font-bold font-mono ${pnlData.kpis.bestDayPnl >= 0 ? "text-positive" : "text-negative"}`}>
+                    {pnlData.kpis.bestDayPnl >= 0 ? "+" : ""}${pnlData.kpis.bestDayPnl.toFixed(2)}
+                  </div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">최악일</div>
+                  <div className={`text-xl font-bold font-mono ${pnlData.kpis.worstDayPnl >= 0 ? "text-positive" : "text-negative"}`}>
+                    {pnlData.kpis.worstDayPnl >= 0 ? "+" : ""}${pnlData.kpis.worstDayPnl.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <div className="text-xs text-muted-foreground mb-2">누적 PnL ($)</div>
@@ -209,6 +238,7 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </div>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

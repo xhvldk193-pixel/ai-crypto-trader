@@ -1046,7 +1046,29 @@ components:
               winRate:
                 type: number
             required: [timestamp, pnl, trades, winRate]
-      required: [cumulative, daily]
+        kpis:
+          type: object
+          properties:
+            totalTrades:
+              type: integer
+            winRate:
+              type: number
+            avgRiskReward:
+              type: number
+            totalPnl:
+              type: number
+            bestDayPnl:
+              type: number
+            bestDayTimestamp:
+              type: number
+              nullable: true
+            worstDayPnl:
+              type: number
+            worstDayTimestamp:
+              type: number
+              nullable: true
+          required: [totalTrades, winRate, avgRiskReward, totalPnl, bestDayPnl, worstDayPnl]
+      required: [cumulative, daily, kpis]
 
     SyncPositionsResult:
       type: object

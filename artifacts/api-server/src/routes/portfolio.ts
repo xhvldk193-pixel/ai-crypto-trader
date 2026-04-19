@@ -123,7 +123,32 @@ router.get("/pnl-timeseries", async (req, res) => {
         winRate: d.total > 0 ? d.wins / d.total : 0,
       }));
 
-    res.json({ cumulative, daily });
+    // Aggregate KPIs across the requested window
+    const wins = filtered.filter((t) => (t.pnl ?? 0) > 0);
+    const losses = filtered.filter((t) => (t.pnl ?? 0) < 0);
+    const totalWin = wins.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const totalLoss = Math.abs(losses.reduce((s, t) => s + (t.pnl ?? 0), 0));
+    const avgWin = wins.length > 0 ? totalWin / wins.length : 0;
+    const avgLoss = losses.length > 0 ? totalLoss / losses.length : 0;
+    const winRate = filtered.length > 0 ? wins.length / filtered.length : 0;
+    const avgRiskReward = avgLoss > 0 ? avgWin / avgLoss : 0;
+    const bestDay = daily.reduce((b, d) => (b === null || d.pnl > b.pnl ? d : b), null as null | typeof daily[number]);
+    const worstDay = daily.reduce((b, d) => (b === null || d.pnl < b.pnl ? d : b), null as null | typeof daily[number]);
+
+    res.json({
+      cumulative,
+      daily,
+      kpis: {
+        totalTrades: filtered.length,
+        winRate,
+        avgRiskReward,
+        totalPnl: cum,
+        bestDayPnl: bestDay?.pnl ?? 0,
+        bestDayTimestamp: bestDay?.timestamp ?? null,
+        worstDayPnl: worstDay?.pnl ?? 0,
+        worstDayTimestamp: worstDay?.timestamp ?? null,
+      },
+    });
   } catch (err) {
     req.log.error({ err }, "Failed to compute PnL timeseries");
     res.status(500).json({ error: "Failed to compute PnL timeseries" });

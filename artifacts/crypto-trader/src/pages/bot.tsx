@@ -157,9 +157,16 @@ export default function BotControl() {
 
   const onSubmit = (data: BotConfigFormValues) => {
     const payload = { ...data, symbol: data.watchSymbols[0] ?? data.symbol };
+    const leverageOrMarginChanged =
+      !!config && (data.leverage !== config.leverage || data.marginType !== config.marginType);
     updateConfig.mutate({ data: payload }, {
       onSuccess: () => {
-        toast({ title: "설정 저장됨", description: "봇 설정이 업데이트되었습니다." });
+        toast({
+          title: "설정 저장됨",
+          description: leverageOrMarginChanged
+            ? "봇 설정이 업데이트되었습니다. 레버리지/마진모드 변경은 다음 신규 진입부터 적용됩니다."
+            : "봇 설정이 업데이트되었습니다.",
+        });
       },
       onError: (err: unknown) => {
         const msg = err instanceof Error ? err.message : "설정 업데이트에 실패했습니다.";

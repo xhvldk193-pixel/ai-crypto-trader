@@ -404,6 +404,16 @@ export const GetPnlTimeseriesResponse = zod.object({
       winRate: zod.number(),
     }),
   ),
+  kpis: zod.object({
+    totalTrades: zod.number(),
+    winRate: zod.number(),
+    avgRiskReward: zod.number(),
+    totalPnl: zod.number(),
+    bestDayPnl: zod.number(),
+    bestDayTimestamp: zod.number().nullish(),
+    worstDayPnl: zod.number(),
+    worstDayTimestamp: zod.number().nullish(),
+  }),
 });
 
 /**
