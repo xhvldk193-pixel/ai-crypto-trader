@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Power, PowerOff, Activity, RefreshCw, Save } from "lucide-react";
@@ -16,6 +18,7 @@ import { formatDate } from "@/lib/format";
 
 const botConfigSchema = z.object({
   symbol: z.string().min(1),
+  watchSymbols: z.array(z.string().min(1)).min(1, "최소 1개 이상의 페어를 선택하세요."),
   timeframe: z.string().min(1),
   tradeAmount: z.coerce.number().min(1),
   maxPositions: z.coerce.number().min(1).max(10),
@@ -45,6 +48,7 @@ export default function BotControl() {
     resolver: zodResolver(botConfigSchema),
     defaultValues: {
       symbol: "BTC/USDT",
+      watchSymbols: ["BTC/USDT"],
       timeframe: "15m",
       tradeAmount: 100,
       maxPositions: 1,
@@ -60,8 +64,10 @@ export default function BotControl() {
 
   useEffect(() => {
     if (config) {
+      const ws = config.watchSymbols && config.watchSymbols.length > 0 ? config.watchSymbols : [config.symbol];
       form.reset({
         symbol: config.symbol,
+        watchSymbols: ws,
         timeframe: config.timeframe,
         tradeAmount: config.tradeAmount,
         maxPositions: config.maxPositions,
@@ -75,7 +81,8 @@ export default function BotControl() {
   }, [config, form]);
 
   const onSubmit = (data: BotConfigFormValues) => {
-    updateConfig.mutate({ data }, {
+    const payload = { ...data, symbol: data.watchSymbols[0] ?? data.symbol };
+    updateConfig.mutate({ data: payload }, {
       onSuccess: () => {
         toast({ title: "설정 저장됨", description: "봇 설정이 업데이트되었습니다." });
       },
@@ -142,50 +149,70 @@ export default function BotControl() {
             {isConfigLoading ? <Skeleton className="h-[400px] w-full" /> : (
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="symbol"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>거래 페어</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="페어 선택" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {symbols.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="timeframe"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>타임프레임</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="타임프레임 선택" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="15m">15분</SelectItem>
-                              <SelectItem value="1h">1시간</SelectItem>
-                              <SelectItem value="4h">4시간</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
+                  <FormField
+                    control={form.control}
+                    name="watchSymbols"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>감시 페어 (다중 선택)</FormLabel>
+                        <FormDescription>
+                          체크한 모든 페어에 대해 봇이 동시에 다이버전스를 분석하고 거래합니다.
+                        </FormDescription>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {field.value && field.value.length > 0 && field.value.map((s) => (
+                            <Badge key={s} variant="secondary" className="font-mono">{s}</Badge>
+                          ))}
+                        </div>
+                        <FormControl>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-48 overflow-y-auto rounded-md border p-3 mt-2">
+                            {symbols.map((s) => {
+                              const checked = field.value?.includes(s) ?? false;
+                              return (
+                                <label key={s} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-1">
+                                  <Checkbox
+                                    checked={checked}
+                                    onCheckedChange={(next) => {
+                                      const current = field.value ?? [];
+                                      if (next) {
+                                        if (!current.includes(s)) field.onChange([...current, s]);
+                                      } else {
+                                        field.onChange(current.filter((x) => x !== s));
+                                      }
+                                    }}
+                                  />
+                                  <span className="text-xs font-mono">{s}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="timeframe"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>타임프레임</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="타임프레임 선택" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="15m">15분</SelectItem>
+                            <SelectItem value="1h">1시간</SelectItem>
+                            <SelectItem value="4h">4시간</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
                   <div className="grid grid-cols-2 gap-4">
                     <FormField

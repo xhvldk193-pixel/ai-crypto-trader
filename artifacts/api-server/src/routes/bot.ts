@@ -41,6 +41,12 @@ router.put("/config", async (req, res) => {
     const body = req.body;
     const updateData: Record<string, unknown> = {};
     if (body.symbol !== undefined) updateData.symbol = body.symbol;
+    if (body.watchSymbols !== undefined && Array.isArray(body.watchSymbols)) {
+      const cleaned = (body.watchSymbols as unknown[])
+        .filter((s): s is string => typeof s === "string" && s.length > 0);
+      const unique = Array.from(new Set(cleaned));
+      updateData.watchSymbols = unique.length > 0 ? unique : [body.symbol ?? "BTC/USDT"];
+    }
     if (body.timeframe !== undefined) updateData.timeframe = body.timeframe;
     if (body.tradeAmount !== undefined) updateData.tradeAmount = body.tradeAmount;
     if (body.maxPositions !== undefined) updateData.maxPositions = body.maxPositions;
@@ -91,8 +97,12 @@ router.get("/logs", async (req, res) => {
 });
 
 function configToResponse(row: typeof botConfigTable.$inferSelect) {
+  const watchSymbols = Array.isArray(row.watchSymbols) && row.watchSymbols.length > 0
+    ? (row.watchSymbols as string[])
+    : [row.symbol];
   return {
     symbol: row.symbol,
+    watchSymbols,
     timeframe: row.timeframe,
     tradeAmount: row.tradeAmount,
     maxPositions: row.maxPositions,

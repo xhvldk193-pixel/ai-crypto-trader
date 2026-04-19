@@ -32,6 +32,7 @@ import type {
   GetBotLogs200,
   GetBotLogsParams,
   GetLatestAiSignal200,
+  GetLatestAiSignalsBySymbol200,
   GetMarketOhlcv200,
   GetMarketOhlcvParams,
   GetMarketSymbols200,
@@ -871,6 +872,85 @@ export function useGetLatestAiSignal<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetLatestAiSignalQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Latest AI signal for each watched symbol
+ */
+export const getGetLatestAiSignalsBySymbolUrl = () => {
+  return `/api/ai/latest-signals-by-symbol`;
+};
+
+export const getLatestAiSignalsBySymbol = async (
+  options?: RequestInit,
+): Promise<GetLatestAiSignalsBySymbol200> => {
+  return customFetch<GetLatestAiSignalsBySymbol200>(
+    getGetLatestAiSignalsBySymbolUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetLatestAiSignalsBySymbolQueryKey = () => {
+  return [`/api/ai/latest-signals-by-symbol`] as const;
+};
+
+export const getGetLatestAiSignalsBySymbolQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetLatestAiSignalsBySymbolQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>
+  > = ({ signal }) => getLatestAiSignalsBySymbol({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLatestAiSignalsBySymbolQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>
+>;
+export type GetLatestAiSignalsBySymbolQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Latest AI signal for each watched symbol
+ */
+
+export function useGetLatestAiSignalsBySymbol<
+  TData = Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignalsBySymbol>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLatestAiSignalsBySymbolQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

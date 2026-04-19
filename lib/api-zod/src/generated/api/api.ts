@@ -251,6 +251,32 @@ export const GetLatestAiSignalResponse = zod.object({
 });
 
 /**
+ * @summary Latest AI signal for each watched symbol
+ */
+export const GetLatestAiSignalsBySymbolResponse = zod.object({
+  signals: zod.array(
+    zod.object({
+      id: zod.string().optional(),
+      symbol: zod.string().optional(),
+      timeframe: zod.string().optional(),
+      action: zod.string().optional(),
+      confidence: zod.number().optional(),
+      riskLevel: zod.string().optional(),
+      currentPrice: zod.number().optional(),
+      entryPrice: zod.number().nullish(),
+      takeProfit: zod.number().nullish(),
+      stopLoss: zod.number().nullish(),
+      expectedMovePercent: zod.number().nullish(),
+      expectedMoveUsd: zod.number().nullish(),
+      reasoning: zod.string().nullish(),
+      bullishCount: zod.number().optional(),
+      bearishCount: zod.number().optional(),
+      createdAt: zod.number().optional(),
+    }),
+  ),
+});
+
+/**
  * @summary Get trade history
  */
 export const getPortfolioHistoryQueryLimitDefault = 50;
@@ -406,6 +432,7 @@ export const StopBotResponse = zod.object({
  */
 export const GetBotConfigResponse = zod.object({
   symbol: zod.string(),
+  watchSymbols: zod.array(zod.string()),
   timeframe: zod.string(),
   tradeAmount: zod.number(),
   maxPositions: zod.number(),
@@ -423,6 +450,7 @@ export const GetBotConfigResponse = zod.object({
  */
 export const UpdateBotConfigBody = zod.object({
   symbol: zod.string().optional(),
+  watchSymbols: zod.array(zod.string()).optional(),
   timeframe: zod.string().optional(),
   tradeAmount: zod.number().optional(),
   maxPositions: zod.number().optional(),
@@ -437,6 +465,7 @@ export const UpdateBotConfigBody = zod.object({
 
 export const UpdateBotConfigResponse = zod.object({
   symbol: zod.string(),
+  watchSymbols: zod.array(zod.string()),
   timeframe: zod.string(),
   tradeAmount: zod.number(),
   maxPositions: zod.number(),

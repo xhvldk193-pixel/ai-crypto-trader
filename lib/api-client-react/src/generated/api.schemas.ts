@@ -291,6 +291,7 @@ export interface BotStatus {
 
 export interface BotConfig {
   symbol: string;
+  watchSymbols: string[];
   timeframe: string;
   tradeAmount: number;
   maxPositions: number;
@@ -305,6 +306,7 @@ export interface BotConfig {
 
 export interface BotConfigUpdate {
   symbol?: string;
+  watchSymbols?: string[];
   timeframe?: string;
   tradeAmount?: number;
   maxPositions?: number;
@@ -497,6 +499,10 @@ export type GetActivePositions200 = {
 
 export type GetLatestAiSignal200 = {
   signal?: StoredAiSignal;
+};
+
+export type GetLatestAiSignalsBySymbol200 = {
+  signals: StoredAiSignal[];
 };
 
 export type GetPortfolioHistoryParams = {

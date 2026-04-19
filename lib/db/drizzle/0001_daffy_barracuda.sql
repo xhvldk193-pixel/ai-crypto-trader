@@ -1,0 +1,1 @@
+ALTER TABLE "bot_config" ADD COLUMN "watch_symbols" jsonb DEFAULT '["BTC/USDT"]'::jsonb NOT NULL;

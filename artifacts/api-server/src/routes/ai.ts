@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { db, aiSignalsTable } from "@workspace/db";
+import { db, aiSignalsTable, botConfigTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { exchangeService } from "../lib/exchange";
 import { computeAtrPercent } from "../lib/indicators";
@@ -153,6 +153,50 @@ router.get("/latest-signal", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to load latest AI signal");
     res.status(500).json({ error: "Failed to load latest AI signal" });
+  }
+});
+
+router.get("/latest-signals-by-symbol", async (req, res) => {
+  try {
+    const cfgRows = await db.select().from(botConfigTable).limit(1);
+    const cfg = cfgRows[0];
+    const watchSet = new Set<string>(
+      cfg
+        ? (Array.isArray(cfg.watchSymbols) && cfg.watchSymbols.length > 0
+            ? (cfg.watchSymbols as string[])
+            : [cfg.symbol])
+        : []
+    );
+    const rows = await db.select().from(aiSignalsTable).orderBy(desc(aiSignalsTable.createdAt)).limit(500);
+    const seen = new Set<string>();
+    const signals = [] as Array<Record<string, unknown>>;
+    for (const r of rows) {
+      if (watchSet.size > 0 && !watchSet.has(r.symbol)) continue;
+      if (seen.has(r.symbol)) continue;
+      seen.add(r.symbol);
+      signals.push({
+        id: String(r.id),
+        symbol: r.symbol,
+        timeframe: r.timeframe,
+        action: r.action,
+        confidence: r.confidence,
+        riskLevel: r.riskLevel,
+        currentPrice: r.currentPrice,
+        entryPrice: r.entryPrice,
+        takeProfit: r.takeProfit,
+        stopLoss: r.stopLoss,
+        expectedMovePercent: r.expectedMovePercent,
+        expectedMoveUsd: r.expectedMoveUsd,
+        reasoning: r.reasoning,
+        bullishCount: r.bullishCount,
+        bearishCount: r.bearishCount,
+        createdAt: r.createdAt.getTime(),
+      });
+    }
+    res.json({ signals });
+  } catch (err) {
+    req.log.error({ err }, "Failed to load latest AI signals by symbol");
+    res.status(500).json({ error: "Failed to load latest AI signals by symbol" });
   }
 });
 

@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const botConfigTable = pgTable("bot_config", {
   id: serial("id").primaryKey(),
   symbol: text("symbol").notNull().default("BTC/USDT"),
+  watchSymbols: jsonb("watch_symbols").$type<string[]>().notNull().default(["BTC/USDT"]),
   timeframe: text("timeframe").notNull().default("15m"),
   tradeAmount: real("trade_amount").notNull().default(100),
   maxPositions: integer("max_positions").notNull().default(1),

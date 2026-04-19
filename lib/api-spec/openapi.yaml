@@ -228,6 +228,25 @@ paths:
                   signal:
                     $ref: "#/components/schemas/StoredAiSignal"
 
+  /ai/latest-signals-by-symbol:
+    get:
+      operationId: getLatestAiSignalsBySymbol
+      tags: [ai]
+      summary: Latest AI signal for each watched symbol
+      responses:
+        "200":
+          description: Latest AI signals grouped by symbol
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signals:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StoredAiSignal"
+                required: [signals]
+
   /portfolio/history:
     get:
       operationId: getPortfolioHistory
@@ -838,6 +857,10 @@ components:
       properties:
         symbol:
           type: string
+        watchSymbols:
+          type: array
+          items:
+            type: string
         timeframe:
           type: string
         tradeAmount:
@@ -860,13 +883,17 @@ components:
           type: boolean
         checkIntervalSeconds:
           type: integer
-      required: [symbol, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds]
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds]
 
     BotConfigUpdate:
       type: object
       properties:
         symbol:
           type: string
+        watchSymbols:
+          type: array
+          items:
+            type: string
         timeframe:
           type: string
         tradeAmount:
