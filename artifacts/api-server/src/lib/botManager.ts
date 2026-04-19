@@ -504,7 +504,32 @@ class BotManager {
       );
     }
 
-    if (config.autoTrade && decision.confidence >= params.minConfidence) {
+    if (!config.autoTrade) {
+      await this.addLog(
+        "info",
+        `${symbol} 진입 스킵 — 자동매매 OFF (신호: ${decision.action}, 신뢰도 ${(decision.confidence * 100).toFixed(0)}%)`,
+        symbol,
+      );
+      return;
+    }
+    if (decision.confidence < params.minConfidence) {
+      await this.addLog(
+        "info",
+        `${symbol} 진입 스킵 — 신뢰도 부족 (${(decision.confidence * 100).toFixed(0)}% < 최소 ${(params.minConfidence * 100).toFixed(0)}%)`,
+        symbol,
+      );
+      return;
+    }
+    if (this.halted) {
+      await this.addLog(
+        "warning",
+        `${symbol} 진입 스킵 — 일일 손실 한도 도달 상태`,
+        symbol,
+      );
+      return;
+    }
+
+    {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
