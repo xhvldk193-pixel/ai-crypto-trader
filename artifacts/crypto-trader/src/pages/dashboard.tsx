@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useGetMarketTicker, useGetPortfolioSummary, useGetBotStatus, useGetBotLogs, useGetLatestAiSignalsBySymbol, useGetActivePositions, useGetPnlTimeseries } from "@workspace/api-client-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -18,7 +19,8 @@ export default function Dashboard() {
   const { data: logs, isLoading: isLogsLoading } = useGetBotLogs({ limit: 5 }, { query: { refetchInterval: 5000 } as never });
   const { data: signalsData } = useGetLatestAiSignalsBySymbol({ query: { refetchInterval: 5000 } as never });
   const { data: activeData } = useGetActivePositions({ query: { refetchInterval: 5000 } as never });
-  const { data: pnlData } = useGetPnlTimeseries({ days: 30 }, { query: { refetchInterval: 30000 } as never });
+  const [pnlDays, setPnlDays] = useState<7 | 30 | 90>(30);
+  const { data: pnlData } = useGetPnlTimeseries({ days: pnlDays }, { query: { refetchInterval: 30000 } as never });
 
   const cumulativeChart = useMemo(
     () => (pnlData?.cumulative ?? []).map((p) => ({
@@ -165,9 +167,23 @@ export default function Dashboard() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" /> PnL 추이 (최근 30일)</CardTitle>
-          <CardDescription>실현 손익 누적 곡선과 일별 승률</CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-4">
+          <div className="space-y-1.5">
+            <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" /> PnL 추이 (최근 {pnlDays}일)</CardTitle>
+            <CardDescription>실현 손익 누적 곡선과 일별 승률</CardDescription>
+          </div>
+          <ToggleGroup
+            type="single"
+            size="sm"
+            value={String(pnlDays)}
+            onValueChange={(v) => {
+              if (v === "7" || v === "30" || v === "90") setPnlDays(Number(v) as 7 | 30 | 90);
+            }}
+          >
+            <ToggleGroupItem value="7" aria-label="7일">7일</ToggleGroupItem>
+            <ToggleGroupItem value="30" aria-label="30일">30일</ToggleGroupItem>
+            <ToggleGroupItem value="90" aria-label="90일">90일</ToggleGroupItem>
+          </ToggleGroup>
         </CardHeader>
         <CardContent>
           {cumulativeChart.length === 0 ? (
