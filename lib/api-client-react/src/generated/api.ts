@@ -20,6 +20,8 @@ import type {
   AiSignalRequest,
   AiSignalResponse,
   AnalyzeDivergenceParams,
+  BacktestRequest,
+  BacktestResult,
   BotConfig,
   BotConfigUpdate,
   BotStatus,
@@ -1822,3 +1824,89 @@ export function useGetBotLogs<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Run divergence strategy backtest over historical candles
+ */
+export const getRunBacktestUrl = () => {
+  return `/api/backtest/run`;
+};
+
+export const runBacktest = async (
+  backtestRequest: BacktestRequest,
+  options?: RequestInit,
+): Promise<BacktestResult> => {
+  return customFetch<BacktestResult>(getRunBacktestUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(backtestRequest),
+  });
+};
+
+export const getRunBacktestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runBacktest>>,
+    TError,
+    { data: BodyType<BacktestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runBacktest>>,
+  TError,
+  { data: BodyType<BacktestRequest> },
+  TContext
+> => {
+  const mutationKey = ["runBacktest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runBacktest>>,
+    { data: BodyType<BacktestRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return runBacktest(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunBacktestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runBacktest>>
+>;
+export type RunBacktestMutationBody = BodyType<BacktestRequest>;
+export type RunBacktestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run divergence strategy backtest over historical candles
+ */
+export const useRunBacktest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runBacktest>>,
+    TError,
+    { data: BodyType<BacktestRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runBacktest>>,
+  TError,
+  { data: BodyType<BacktestRequest> },
+  TContext
+> => {
+  return useMutation(getRunBacktestMutationOptions(options));
+};

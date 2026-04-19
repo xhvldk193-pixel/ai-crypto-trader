@@ -6,6 +6,7 @@ import aiRouter from "./ai";
 import portfolioRouter from "./portfolio";
 import tradeRouter from "./trade";
 import botRouter from "./bot";
+import backtestRouter from "./backtest";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use("/ai", aiRouter);
 router.use("/portfolio", portfolioRouter);
 router.use("/trade", tradeRouter);
 router.use("/bot", botRouter);
+router.use("/backtest", backtestRouter);
 
 export default router;

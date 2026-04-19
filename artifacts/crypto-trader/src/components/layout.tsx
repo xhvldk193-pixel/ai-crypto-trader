@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight } from "lucide-react";
+import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight, History } from "lucide-react";
 import { useGetBotStatus } from "@workspace/api-client-react";
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -13,6 +13,7 @@ export function Layout({ children }: { children: ReactNode }) {
     { href: "/portfolio", label: "Portfolio", icon: PieChart },
     { href: "/bot", label: "Bot Control", icon: Settings },
     { href: "/trade", label: "Trade", icon: ArrowLeftRight },
+    { href: "/backtest", label: "Backtest", icon: History },
   ];
 
   return (

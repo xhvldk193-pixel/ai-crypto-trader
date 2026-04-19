@@ -40,6 +40,77 @@ async function binancePublic(path: string, params?: Record<string, string>) {
   return res.json() as Promise<unknown>;
 }
 
+// OKX public API fallback for geo-restricted environments where Binance/Bybit
+// return HTTP 451/403. OKX allows public requests from most cloud IPs.
+const OKX_TF: Record<string, string> = {
+  "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1h": "1H", "4h": "4H", "1d": "1D",
+};
+
+function toOkxInst(symbol: string) {
+  // "BTC/USDT" -> "BTC-USDT"
+  return symbol.replace("/", "-");
+}
+
+async function okxOhlcv(symbol: string, timeframe: string, limit: number) {
+  const bar = OKX_TF[timeframe] ?? "1H";
+  const instId = toOkxInst(symbol);
+  // OKX history endpoint allows up to 300 per request and supports paging via `after` (older end).
+  const out: Array<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+  let after: string | undefined;
+  while (out.length < limit) {
+    const url = new URL("https://www.okx.com/api/v5/market/history-candles");
+    url.searchParams.set("instId", instId);
+    url.searchParams.set("bar", bar);
+    url.searchParams.set("limit", Math.min(300, limit - out.length).toString());
+    if (after) url.searchParams.set("after", after);
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`OKX kline ${res.status}`);
+    const json = (await res.json()) as { code: string; msg: string; data?: string[][] };
+    if (json.code !== "0") throw new Error(`OKX kline ${json.msg}`);
+    const data = json.data ?? [];
+    if (data.length === 0) break;
+    for (const k of data) {
+      out.push({
+        timestamp: Number(k[0]),
+        open: parseFloat(k[1]),
+        high: parseFloat(k[2]),
+        low: parseFloat(k[3]),
+        close: parseFloat(k[4]),
+        volume: parseFloat(k[5]),
+      });
+    }
+    after = data[data.length - 1][0];
+    if (data.length < 300) break;
+  }
+  return out.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function okxTicker(symbol: string) {
+  const instId = toOkxInst(symbol);
+  const url = `https://www.okx.com/api/v5/market/ticker?instId=${instId}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`OKX ticker ${res.status}`);
+  const json = (await res.json()) as {
+    code: string;
+    data?: Array<{ last: string; open24h: string; high24h: string; low24h: string; volCcy24h: string }>;
+  };
+  const t = json.data?.[0];
+  if (!t) throw new Error("OKX ticker empty");
+  const price = parseFloat(t.last);
+  const open24 = parseFloat(t.open24h);
+  return {
+    symbol,
+    price,
+    change24h: price - open24,
+    changePercent24h: open24 > 0 ? ((price - open24) / open24) * 100 : 0,
+    volume24h: parseFloat(t.volCcy24h),
+    high24h: parseFloat(t.high24h),
+    low24h: parseFloat(t.low24h),
+    timestamp: Date.now(),
+  };
+}
+
 async function binanceSigned(
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -81,7 +152,12 @@ async function fetchPublicTicker(symbol: string) {
       low24h: parseFloat(data.lowPrice),
       timestamp: Date.now(),
     };
-  } catch {
+  } catch (binanceErr) {
+    try {
+      return await okxTicker(symbol);
+    } catch {
+      logger.warn({ err: String(binanceErr) }, "Both Binance and OKX ticker failed; using stub");
+    }
     return {
       symbol,
       price: 67000 + Math.random() * 2000 - 1000,
@@ -139,9 +215,13 @@ export const exchangeService = {
         close: parseFloat(k[4]),
         volume: parseFloat(k[5]),
       }));
-    } catch (err) {
-      logger.error({ err }, "Failed to fetch OHLCV");
-      return [];
+    } catch (binanceErr) {
+      try {
+        return await okxOhlcv(symbol, timeframe, limit);
+      } catch (okxErr) {
+        logger.error({ binanceErr: String(binanceErr), okxErr: String(okxErr) }, "Failed to fetch OHLCV from both Binance and OKX");
+        return [];
+      }
     }
   },
 

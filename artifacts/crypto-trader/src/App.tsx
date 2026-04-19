@@ -11,6 +11,7 @@ import Chart from "@/pages/chart";
 import Portfolio from "@/pages/portfolio";
 import BotControl from "@/pages/bot";
 import Trade from "@/pages/trade";
+import Backtest from "@/pages/backtest";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,6 +31,7 @@ function Router() {
         <Route path="/portfolio" component={Portfolio} />
         <Route path="/bot" component={BotControl} />
         <Route path="/trade" component={Trade} />
+        <Route path="/backtest" component={Backtest} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

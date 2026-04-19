@@ -1,6 +1,6 @@
 // Divergence analysis — TypeScript port of the Pine Script indicator logic
 
-type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
+export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
 
 type DivergenceSignal = {
   indicator: string;

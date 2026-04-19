@@ -335,6 +335,98 @@ export interface BotLog {
   timestamp: number;
 }
 
+export type BacktestRequestTimeframe =
+  (typeof BacktestRequestTimeframe)[keyof typeof BacktestRequestTimeframe];
+
+export const BacktestRequestTimeframe = {
+  "1m": "1m",
+  "5m": "5m",
+  "15m": "15m",
+  "30m": "30m",
+  "1h": "1h",
+  "4h": "4h",
+  "1d": "1d",
+} as const;
+
+export interface BacktestRequest {
+  symbol: string;
+  timeframe?: BacktestRequestTimeframe;
+  /**
+   * @minimum 100
+   * @maximum 1000
+   */
+  candleCount?: number;
+  tradeAmountUsd?: number;
+  stopLossPercent?: number;
+  takeProfitPercent?: number;
+  feePercent?: number;
+  warmupBars?: number;
+  windowBars?: number;
+}
+
+export type BacktestTradeSide =
+  (typeof BacktestTradeSide)[keyof typeof BacktestTradeSide];
+
+export const BacktestTradeSide = {
+  BUY: "BUY",
+  SELL: "SELL",
+} as const;
+
+export type BacktestTradeExitReason =
+  (typeof BacktestTradeExitReason)[keyof typeof BacktestTradeExitReason];
+
+export const BacktestTradeExitReason = {
+  tp: "tp",
+  sl: "sl",
+  end: "end",
+} as const;
+
+export interface BacktestTrade {
+  entryTime: number;
+  exitTime: number;
+  side: BacktestTradeSide;
+  entryPrice: number;
+  exitPrice: number;
+  takeProfit: number;
+  stopLoss: number;
+  quantity: number;
+  pnlUsd: number;
+  pnlPercent: number;
+  exitReason: BacktestTradeExitReason;
+  bullishCount: number;
+  bearishCount: number;
+}
+
+export interface EquityPoint {
+  time: number;
+  equity: number;
+}
+
+export interface BacktestMetrics {
+  initialEquity: number;
+  finalEquity: number;
+  totalReturnPercent: number;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRatePercent: number;
+  avgWinUsd: number;
+  avgLossUsd: number;
+  profitFactor: number;
+  maxDrawdownPercent: number;
+  sharpeRatio: number;
+}
+
+export interface BacktestResult {
+  symbol: string;
+  timeframe: string;
+  startTime: number;
+  endTime: number;
+  trades: BacktestTrade[];
+  equityCurve: EquityPoint[];
+  metrics: BacktestMetrics;
+}
+
 export type GetMarketSymbols200 = {
   symbols: string[];
 };
