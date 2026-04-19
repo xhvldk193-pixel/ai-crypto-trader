@@ -363,8 +363,11 @@ class BotManager {
       }
     }
 
-    if (added > 0 || removed > 0) {
-      await this.addLog("info", `거래소↔DB 동기화: +${added} / -${removed}`).catch(() => {});
+    if (removed > 0) {
+      await this.addLog("warning", `거래소↔DB 동기화: DB 정리 -${removed} (거래소에 없는 phantom 포지션 제거)`).catch(() => {});
+    }
+    if (added > 0) {
+      await this.addLog("info", `거래소↔DB 동기화: 거래소→DB +${added}`).catch(() => {});
     }
     return { added, removed, details };
   }

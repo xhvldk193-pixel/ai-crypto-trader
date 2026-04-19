@@ -6,6 +6,7 @@ import { useGetBotStatus, useGetBotConfig, useUpdateBotConfig, useStartBot, useS
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -618,11 +619,22 @@ export default function BotControl() {
                         name="leverage"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>레버리지 (x)</FormLabel>
+                            <FormLabel>레버리지: {field.value}x</FormLabel>
                             <FormControl>
-                              <Input type="number" min={1} max={125} {...field} />
+                              <div className="space-y-2 pt-2">
+                                <Slider
+                                  min={1}
+                                  max={125}
+                                  step={1}
+                                  value={[Number(field.value) || 10]}
+                                  onValueChange={(v: number[]) => field.onChange(v[0])}
+                                />
+                                <div className="flex justify-between text-[10px] text-muted-foreground">
+                                  <span>1x</span><span>25x</span><span>50x</span><span>75x</span><span>125x</span>
+                                </div>
+                              </div>
                             </FormControl>
-                            <FormDescription className="text-xs">1–125배 (현재 기본 10x)</FormDescription>
+                            <FormDescription className="text-xs">1–125배 슬라이더로 조절 (기본 10x)</FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
