@@ -1,17 +1,26 @@
 import { Router } from "express";
-import { exchangeService } from "../lib/exchange";
+import { exchangeService, type PositionSide } from "../lib/exchange";
 import { db } from "@workspace/db";
-import { tradeHistoryTable } from "@workspace/db";
+import { tradeHistoryTable, botConfigTable } from "@workspace/db";
 
 const router = Router();
 
 router.post("/order", async (req, res) => {
-  const { symbol, side, type, quantity, price } = req.body;
+  const { symbol, side, type, quantity, price, positionSide, reduceOnly } = req.body;
   if (!symbol || !side || !type || !quantity) {
     res.status(400).json({ error: "symbol, side, type, quantity required" }); return;
   }
   try {
-    const order = await exchangeService.placeOrder(symbol, side, type, quantity, price);
+    const cfgRows = await db.select().from(botConfigTable).limit(1);
+    const cfg = cfgRows[0];
+    const ps: PositionSide | undefined =
+      positionSide === "LONG" || positionSide === "SHORT" ? positionSide : undefined;
+    const order = await exchangeService.placeOrder(symbol, side, type, quantity, price, {
+      positionSide: ps,
+      reduceOnly: Boolean(reduceOnly),
+      leverage: cfg?.leverage ?? 10,
+      marginType: cfg?.marginType ?? "ISOLATED",
+    });
     
     // Record in trade history
     const ticker = await exchangeService.getTicker(symbol);

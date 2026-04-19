@@ -69,6 +69,14 @@ router.put("/config", async (req, res) => {
     if (body.symbolOverrides !== undefined && body.symbolOverrides && typeof body.symbolOverrides === "object") {
       updateData.symbolOverrides = sanitizeSymbolOverrides(body.symbolOverrides as Record<string, unknown>);
     }
+    if (body.leverage !== undefined) {
+      const lev = Number(body.leverage);
+      if (Number.isFinite(lev) && lev >= 1 && lev <= 125) updateData.leverage = Math.floor(lev);
+    }
+    if (body.marginType !== undefined) {
+      const mt = String(body.marginType).toUpperCase();
+      if (mt === "ISOLATED" || mt === "CROSSED") updateData.marginType = mt;
+    }
     updateData.updatedAt = new Date();
 
     let updated;
@@ -181,6 +189,8 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     mtfTimeframes: (row.mtfTimeframes as string[]) ?? ["1h", "4h"],
     useFundingRate: row.useFundingRate,
     symbolOverrides: (row.symbolOverrides as Record<string, Record<string, number>>) ?? {},
+    leverage: row.leverage,
+    marginType: row.marginType,
   };
 }
 

@@ -433,12 +433,17 @@ class BotManager {
       }
 
       try {
-        const quantity = params.tradeAmount / entryPrice;
+        const leverage = config.leverage ?? 10;
+        const notional = params.tradeAmount * leverage;
+        const quantity = notional / entryPrice;
+        const positionSide = side === "long" ? "LONG" : "SHORT";
         const order = await exchangeService.placeOrder(
           symbol,
           decision.action.toLowerCase(),
           "market",
-          quantity
+          quantity,
+          undefined,
+          { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" },
         );
         this.executedTrades++;
 
@@ -551,7 +556,9 @@ class BotManager {
           pos.symbol,
           isLong ? "sell" : "buy",
           "market",
-          pos.quantity
+          pos.quantity,
+          undefined,
+          { positionSide: isLong ? "LONG" : "SHORT", reduceOnly: true },
         );
         const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
         const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);

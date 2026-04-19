@@ -29,6 +29,8 @@ export const botConfigTable = pgTable("bot_config", {
   mtfTimeframes: jsonb("mtf_timeframes").$type<string[]>().notNull().default(["1h","4h"]),
   useFundingRate: boolean("use_funding_rate").notNull().default(true),
   symbolOverrides: jsonb("symbol_overrides").$type<Record<string, SymbolOverride>>().notNull().default({}),
+  leverage: integer("leverage").notNull().default(10),
+  marginType: text("margin_type").notNull().default("ISOLATED"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
