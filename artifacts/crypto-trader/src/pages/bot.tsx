@@ -56,6 +56,8 @@ export default function BotControl() {
     },
   });
 
+  const useAiTargetsValue = form.watch("useAiTargets");
+
   useEffect(() => {
     if (config) {
       form.reset({
@@ -220,9 +222,9 @@ export default function BotControl() {
                       name="stopLossPercent"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>손절 (%)</FormLabel>
+                          <FormLabel>손절 (%) {useAiTargetsValue && <span className="text-xs text-muted-foreground">(AI 사용중)</span>}</FormLabel>
                           <FormControl>
-                            <Input type="number" step="0.1" {...field} />
+                            <Input type="number" step="0.1" disabled={useAiTargetsValue} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -233,9 +235,9 @@ export default function BotControl() {
                       name="takeProfitPercent"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>익절 (%)</FormLabel>
+                          <FormLabel>익절 (%) {useAiTargetsValue && <span className="text-xs text-muted-foreground">(AI 사용중)</span>}</FormLabel>
                           <FormControl>
-                            <Input type="number" step="0.1" {...field} />
+                            <Input type="number" step="0.1" disabled={useAiTargetsValue} {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>

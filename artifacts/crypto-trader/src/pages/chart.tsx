@@ -1,12 +1,12 @@
 import { useState, useMemo } from "react";
-import { useGetMarketOhlcv, useGetMarketSymbols, useAnalyzeDivergence, useGetAiSignal, useGetMarketTicker } from "@workspace/api-client-react";
+import { useGetMarketOhlcv, useGetMarketSymbols, useAnalyzeDivergence, useGetAiSignal, useGetMarketTicker, useGetActivePositions } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatUsd, formatNumber } from "@/lib/format";
-import { ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { ComposedChart, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { Brain, TrendingUp, TrendingDown, Activity } from "lucide-react";
 
 function formatChartTime(ts: number, timeframe: string) {
@@ -35,6 +35,12 @@ export default function Chart() {
   const { data: divergenceData, isLoading: isDivergenceLoading } = useAnalyzeDivergence(
     { symbol, timeframe },
     { query: { refetchInterval: 60000 } as never }
+  );
+
+  const { data: activeData } = useGetActivePositions({ query: { refetchInterval: 5000 } as never });
+  const symbolPositions = useMemo(
+    () => (activeData?.positions ?? []).filter((p) => p.symbol === symbol),
+    [activeData, symbol]
   );
 
   const getAiSignal = useGetAiSignal();
@@ -66,15 +72,33 @@ export default function Chart() {
     }));
   }, [ohlcvData, timeframe]);
 
-  const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.low)) * 0.99 : 0;
-  const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.high)) * 1.01 : 0;
+  const aiEntry = aiSignalResult?.suggestedEntryPrice as number | undefined;
+  const aiTp = aiSignalResult?.suggestedTakeProfit as number | undefined;
+  const aiSl = aiSignalResult?.suggestedStopLoss as number | undefined;
+  const overlayPrices = useMemo(() => {
+    const prices: number[] = [];
+    for (const p of symbolPositions) {
+      prices.push(p.entryPrice, p.takeProfit, p.stopLoss);
+    }
+    if (Number.isFinite(aiEntry)) prices.push(aiEntry as number);
+    if (Number.isFinite(aiTp)) prices.push(aiTp as number);
+    if (Number.isFinite(aiSl)) prices.push(aiSl as number);
+    return prices;
+  }, [symbolPositions, aiEntry, aiTp, aiSl]);
+
+  const minPrice = chartData.length > 0
+    ? Math.min(...chartData.map(d => d.low), ...overlayPrices) * 0.99
+    : 0;
+  const maxPrice = chartData.length > 0
+    ? Math.max(...chartData.map(d => d.high), ...overlayPrices) * 1.01
+    : 0;
 
   const action = aiSignalResult?.action as string | undefined;
   const confidence = aiSignalResult?.confidence as number | undefined;
   const riskLevel = aiSignalResult?.riskLevel as string | undefined;
-  const suggestedEntryPrice = aiSignalResult?.suggestedEntryPrice as number | undefined;
-  const suggestedStopLoss = aiSignalResult?.suggestedStopLoss as number | undefined;
-  const suggestedTakeProfit = aiSignalResult?.suggestedTakeProfit as number | undefined;
+  const suggestedEntryPrice = aiEntry;
+  const suggestedStopLoss = aiSl;
+  const suggestedTakeProfit = aiTp;
   const reasoning = aiSignalResult?.reasoning as string | undefined;
 
   return (
@@ -189,6 +213,45 @@ export default function Chart() {
                       opacity={0.5} 
                       barSize={4}
                     />
+                    {symbolPositions.map((p) => (
+                      <ReferenceLine
+                        key={`entry-${p.id}`}
+                        yAxisId="price"
+                        y={p.entryPrice}
+                        stroke="hsl(var(--muted-foreground))"
+                        strokeDasharray="4 4"
+                        label={{ value: `진입 ${formatUsd(p.entryPrice)}`, position: "insideRight", fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+                      />
+                    ))}
+                    {symbolPositions.map((p) => (
+                      <ReferenceLine
+                        key={`tp-${p.id}`}
+                        yAxisId="price"
+                        y={p.takeProfit}
+                        stroke="hsl(var(--positive))"
+                        strokeDasharray="4 4"
+                        label={{ value: `TP ${formatUsd(p.takeProfit)}`, position: "insideRight", fill: "hsl(var(--positive))", fontSize: 11 }}
+                      />
+                    ))}
+                    {symbolPositions.map((p) => (
+                      <ReferenceLine
+                        key={`sl-${p.id}`}
+                        yAxisId="price"
+                        y={p.stopLoss}
+                        stroke="hsl(var(--negative))"
+                        strokeDasharray="4 4"
+                        label={{ value: `SL ${formatUsd(p.stopLoss)}`, position: "insideRight", fill: "hsl(var(--negative))", fontSize: 11 }}
+                      />
+                    ))}
+                    {Number.isFinite(aiEntry) && symbolPositions.length === 0 && (
+                      <ReferenceLine yAxisId="price" y={aiEntry as number} stroke="hsl(var(--muted-foreground))" strokeDasharray="2 6" label={{ value: `AI 진입 ${formatUsd(aiEntry as number)}`, position: "insideRight", fill: "hsl(var(--muted-foreground))", fontSize: 10 }} />
+                    )}
+                    {Number.isFinite(aiTp) && symbolPositions.length === 0 && (
+                      <ReferenceLine yAxisId="price" y={aiTp as number} stroke="hsl(var(--positive))" strokeDasharray="2 6" label={{ value: `AI TP ${formatUsd(aiTp as number)}`, position: "insideRight", fill: "hsl(var(--positive))", fontSize: 10 }} />
+                    )}
+                    {Number.isFinite(aiSl) && symbolPositions.length === 0 && (
+                      <ReferenceLine yAxisId="price" y={aiSl as number} stroke="hsl(var(--negative))" strokeDasharray="2 6" label={{ value: `AI SL ${formatUsd(aiSl as number)}`, position: "insideRight", fill: "hsl(var(--negative))", fontSize: 10 }} />
+                    )}
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
