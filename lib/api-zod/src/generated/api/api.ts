@@ -149,6 +149,20 @@ export const GetAiSignalResponse = zod.object({
   suggestedEntryPrice: zod.number().optional(),
   suggestedStopLoss: zod.number().optional(),
   suggestedTakeProfit: zod.number().optional(),
+  expectedMovePercent: zod
+    .number()
+    .optional()
+    .describe(
+      "AI's predicted price move magnitude in percent (signed; positive = up, negative = down)",
+    ),
+  expectedMoveUsd: zod
+    .number()
+    .optional()
+    .describe("AI's predicted absolute price move in USD"),
+  atrPercent: zod
+    .number()
+    .optional()
+    .describe("Recent volatility (ATR \/ price) as a reference, in percent"),
   analyzedAt: zod.number(),
 });
 
@@ -183,6 +197,57 @@ export const GetPortfolioPositionsResponse = zod.object({
       openedAt: zod.number(),
     }),
   ),
+});
+
+/**
+ * @summary Get tracked active positions with AI-defined TP/SL
+ */
+export const GetActivePositionsResponse = zod.object({
+  positions: zod.array(
+    zod.object({
+      id: zod.string(),
+      symbol: zod.string(),
+      side: zod.string(),
+      entryPrice: zod.number(),
+      currentPrice: zod.number(),
+      quantity: zod.number(),
+      takeProfit: zod.number(),
+      stopLoss: zod.number(),
+      expectedMovePercent: zod.number().nullish(),
+      aiConfidence: zod.number().nullish(),
+      aiReasoning: zod.string().nullish(),
+      triggeredBy: zod.string(),
+      unrealizedPnl: zod.number(),
+      unrealizedPnlPercent: zod.number(),
+      openedAt: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get the most recent AI signal recorded by the bot
+ */
+export const GetLatestAiSignalResponse = zod.object({
+  signal: zod
+    .object({
+      id: zod.string().optional(),
+      symbol: zod.string().optional(),
+      timeframe: zod.string().optional(),
+      action: zod.string().optional(),
+      confidence: zod.number().optional(),
+      riskLevel: zod.string().optional(),
+      currentPrice: zod.number().optional(),
+      entryPrice: zod.number().nullish(),
+      takeProfit: zod.number().nullish(),
+      stopLoss: zod.number().nullish(),
+      expectedMovePercent: zod.number().nullish(),
+      expectedMoveUsd: zod.number().nullish(),
+      reasoning: zod.string().nullish(),
+      bullishCount: zod.number().optional(),
+      bearishCount: zod.number().optional(),
+      createdAt: zod.number().optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -349,6 +414,7 @@ export const GetBotConfigResponse = zod.object({
   minConfidence: zod.number(),
   enabledIndicators: zod.array(zod.string()),
   autoTrade: zod.boolean(),
+  useAiTargets: zod.boolean(),
   checkIntervalSeconds: zod.number(),
 });
 
@@ -365,6 +431,7 @@ export const UpdateBotConfigBody = zod.object({
   minConfidence: zod.number().optional(),
   enabledIndicators: zod.array(zod.string()).optional(),
   autoTrade: zod.boolean().optional(),
+  useAiTargets: zod.boolean().optional(),
   checkIntervalSeconds: zod.number().optional(),
 });
 
@@ -378,6 +445,7 @@ export const UpdateBotConfigResponse = zod.object({
   minConfidence: zod.number(),
   enabledIndicators: zod.array(zod.string()),
   autoTrade: zod.boolean(),
+  useAiTargets: zod.boolean(),
   checkIntervalSeconds: zod.number(),
 });
 

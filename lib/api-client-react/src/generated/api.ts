@@ -26,8 +26,10 @@ import type {
   DeleteOrder200,
   DeleteOrderParams,
   DivergenceResult,
+  GetActivePositions200,
   GetBotLogs200,
   GetBotLogsParams,
+  GetLatestAiSignal200,
   GetMarketOhlcv200,
   GetMarketOhlcvParams,
   GetMarketSymbols200,
@@ -717,6 +719,156 @@ export function useGetPortfolioPositions<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetPortfolioPositionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get tracked active positions with AI-defined TP/SL
+ */
+export const getGetActivePositionsUrl = () => {
+  return `/api/portfolio/active-positions`;
+};
+
+export const getActivePositions = async (
+  options?: RequestInit,
+): Promise<GetActivePositions200> => {
+  return customFetch<GetActivePositions200>(getGetActivePositionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetActivePositionsQueryKey = () => {
+  return [`/api/portfolio/active-positions`] as const;
+};
+
+export const getGetActivePositionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getActivePositions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getActivePositions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetActivePositionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getActivePositions>>
+  > = ({ signal }) => getActivePositions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getActivePositions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetActivePositionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getActivePositions>>
+>;
+export type GetActivePositionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get tracked active positions with AI-defined TP/SL
+ */
+
+export function useGetActivePositions<
+  TData = Awaited<ReturnType<typeof getActivePositions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getActivePositions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetActivePositionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get the most recent AI signal recorded by the bot
+ */
+export const getGetLatestAiSignalUrl = () => {
+  return `/api/ai/latest-signal`;
+};
+
+export const getLatestAiSignal = async (
+  options?: RequestInit,
+): Promise<GetLatestAiSignal200> => {
+  return customFetch<GetLatestAiSignal200>(getGetLatestAiSignalUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetLatestAiSignalQueryKey = () => {
+  return [`/api/ai/latest-signal`] as const;
+};
+
+export const getGetLatestAiSignalQueryOptions = <
+  TData = Awaited<ReturnType<typeof getLatestAiSignal>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignal>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetLatestAiSignalQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getLatestAiSignal>>
+  > = ({ signal }) => getLatestAiSignal({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignal>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetLatestAiSignalQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getLatestAiSignal>>
+>;
+export type GetLatestAiSignalQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get the most recent AI signal recorded by the bot
+ */
+
+export function useGetLatestAiSignal<
+  TData = Awaited<ReturnType<typeof getLatestAiSignal>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getLatestAiSignal>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetLatestAiSignalQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

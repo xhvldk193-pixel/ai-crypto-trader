@@ -1,18 +1,19 @@
-import { pgTable, text, real, integer, boolean, timestamp, serial, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, real, integer, boolean, timestamp, serial, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const botConfigTable = pgTable("bot_config", {
   id: serial("id").primaryKey(),
   symbol: text("symbol").notNull().default("BTC/USDT"),
-  timeframe: text("timeframe").notNull().default("1h"),
+  timeframe: text("timeframe").notNull().default("15m"),
   tradeAmount: real("trade_amount").notNull().default(100),
-  maxPositions: integer("max_positions").notNull().default(3),
+  maxPositions: integer("max_positions").notNull().default(1),
   stopLossPercent: real("stop_loss_percent").notNull().default(2),
   takeProfitPercent: real("take_profit_percent").notNull().default(5),
   minConfidence: real("min_confidence").notNull().default(0.7),
   enabledIndicators: jsonb("enabled_indicators").notNull().default(["MACD","RSI","Stoch","CCI","MOM","OBV","VWMACD","CMF","MFI"]),
   autoTrade: boolean("auto_trade").notNull().default(false),
+  useAiTargets: boolean("use_ai_targets").notNull().default(true),
   checkIntervalSeconds: integer("check_interval_seconds").notNull().default(60),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -51,3 +52,47 @@ export const tradeHistoryTable = pgTable("trade_history", {
 export const insertTradeHistorySchema = createInsertSchema(tradeHistoryTable).omit({ id: true, createdAt: true });
 export type InsertTradeHistory = z.infer<typeof insertTradeHistorySchema>;
 export type TradeHistory = typeof tradeHistoryTable.$inferSelect;
+
+export const activePositionsTable = pgTable("active_positions", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull(),
+  side: text("side").notNull().default("long"),
+  entryPrice: real("entry_price").notNull(),
+  quantity: real("quantity").notNull(),
+  takeProfit: real("take_profit").notNull(),
+  stopLoss: real("stop_loss").notNull(),
+  expectedMovePercent: real("expected_move_percent"),
+  aiConfidence: real("ai_confidence"),
+  aiReasoning: text("ai_reasoning"),
+  triggeredBy: text("triggered_by").notNull().default("bot"),
+  openedAt: timestamp("opened_at").defaultNow().notNull(),
+}, (table) => ({
+  symbolUnique: uniqueIndex("active_positions_symbol_unique").on(table.symbol),
+}));
+
+export const insertActivePositionSchema = createInsertSchema(activePositionsTable).omit({ id: true, openedAt: true });
+export type InsertActivePosition = z.infer<typeof insertActivePositionSchema>;
+export type ActivePosition = typeof activePositionsTable.$inferSelect;
+
+export const aiSignalsTable = pgTable("ai_signals", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull(),
+  timeframe: text("timeframe").notNull(),
+  action: text("action").notNull(),
+  confidence: real("confidence").notNull(),
+  riskLevel: text("risk_level").notNull().default("medium"),
+  currentPrice: real("current_price").notNull(),
+  entryPrice: real("entry_price"),
+  takeProfit: real("take_profit"),
+  stopLoss: real("stop_loss"),
+  expectedMovePercent: real("expected_move_percent"),
+  expectedMoveUsd: real("expected_move_usd"),
+  reasoning: text("reasoning"),
+  bullishCount: integer("bullish_count").notNull().default(0),
+  bearishCount: integer("bearish_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertAiSignalSchema = createInsertSchema(aiSignalsTable).omit({ id: true, createdAt: true });
+export type InsertAiSignal = z.infer<typeof insertAiSignalSchema>;
+export type AiSignal = typeof aiSignalsTable.$inferSelect;

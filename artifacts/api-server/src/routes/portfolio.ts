@@ -1,10 +1,47 @@
 import { Router } from "express";
 import { exchangeService } from "../lib/exchange";
 import { db } from "@workspace/db";
-import { tradeHistoryTable } from "@workspace/db";
+import { tradeHistoryTable, activePositionsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 
 const router = Router();
+
+router.get("/active-positions", async (req, res) => {
+  try {
+    const rows = await db.select().from(activePositionsTable);
+    const positions = await Promise.all(rows.map(async (r) => {
+      let currentPrice = r.entryPrice;
+      try {
+        const t = await exchangeService.getTicker(r.symbol);
+        currentPrice = t.price;
+      } catch { /* keep entry price */ }
+      const isLong = r.side === "long";
+      const pnl = (currentPrice - r.entryPrice) * r.quantity * (isLong ? 1 : -1);
+      const pnlPct = ((currentPrice - r.entryPrice) / r.entryPrice) * 100 * (isLong ? 1 : -1);
+      return {
+        id: String(r.id),
+        symbol: r.symbol,
+        side: r.side,
+        entryPrice: r.entryPrice,
+        currentPrice,
+        quantity: r.quantity,
+        takeProfit: r.takeProfit,
+        stopLoss: r.stopLoss,
+        expectedMovePercent: r.expectedMovePercent ?? null,
+        aiConfidence: r.aiConfidence ?? null,
+        aiReasoning: r.aiReasoning ?? null,
+        triggeredBy: r.triggeredBy,
+        unrealizedPnl: pnl,
+        unrealizedPnlPercent: pnlPct,
+        openedAt: r.openedAt.getTime(),
+      };
+    }));
+    res.json({ positions });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get active positions");
+    res.status(500).json({ error: "Failed to get active positions" });
+  }
+});
 
 router.get("/balance", async (req, res) => {
   try {

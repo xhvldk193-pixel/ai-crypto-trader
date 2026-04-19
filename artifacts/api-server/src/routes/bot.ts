@@ -49,6 +49,7 @@ router.put("/config", async (req, res) => {
     if (body.minConfidence !== undefined) updateData.minConfidence = body.minConfidence;
     if (body.enabledIndicators !== undefined) updateData.enabledIndicators = body.enabledIndicators;
     if (body.autoTrade !== undefined) updateData.autoTrade = body.autoTrade;
+    if (body.useAiTargets !== undefined) updateData.useAiTargets = body.useAiTargets;
     if (body.checkIntervalSeconds !== undefined) updateData.checkIntervalSeconds = body.checkIntervalSeconds;
     updateData.updatedAt = new Date();
 
@@ -100,6 +101,7 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     minConfidence: row.minConfidence,
     enabledIndicators: (row.enabledIndicators as string[]) ?? [],
     autoTrade: row.autoTrade,
+    useAiTargets: row.useAiTargets,
     checkIntervalSeconds: row.checkIntervalSeconds,
   };
 }

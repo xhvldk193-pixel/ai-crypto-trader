@@ -17,7 +17,7 @@ function formatChartTime(ts: number, timeframe: string) {
 
 export default function Chart() {
   const [symbol, setSymbol] = useState("BTC/USDT");
-  const [timeframe, setTimeframe] = useState<"15m" | "1h" | "4h" | "1d">("1h");
+  const [timeframe, setTimeframe] = useState<"15m" | "1h" | "4h" | "1d">("15m");
 
   const { data: symbolsData } = useGetMarketSymbols();
   const symbols = symbolsData?.symbols || ["BTC/USDT", "ETH/USDT", "SOL/USDT"];

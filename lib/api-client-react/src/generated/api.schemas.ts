@@ -100,6 +100,12 @@ export interface AiSignalResponse {
   suggestedEntryPrice?: number;
   suggestedStopLoss?: number;
   suggestedTakeProfit?: number;
+  /** AI's predicted price move magnitude in percent (signed; positive = up, negative = down) */
+  expectedMovePercent?: number;
+  /** AI's predicted absolute price move in USD */
+  expectedMoveUsd?: number;
+  /** Recent volatility (ATR / price) as a reference, in percent */
+  atrPercent?: number;
   analyzedAt: number;
 }
 
@@ -131,6 +137,43 @@ export interface Position {
   pnl: number;
   pnlPercent: number;
   openedAt: number;
+}
+
+export interface ActivePosition {
+  id: string;
+  symbol: string;
+  side: string;
+  entryPrice: number;
+  currentPrice: number;
+  quantity: number;
+  takeProfit: number;
+  stopLoss: number;
+  expectedMovePercent?: number | null;
+  aiConfidence?: number | null;
+  aiReasoning?: string | null;
+  triggeredBy: string;
+  unrealizedPnl: number;
+  unrealizedPnlPercent: number;
+  openedAt: number;
+}
+
+export interface StoredAiSignal {
+  id?: string;
+  symbol?: string;
+  timeframe?: string;
+  action?: string;
+  confidence?: number;
+  riskLevel?: string;
+  currentPrice?: number;
+  entryPrice?: number | null;
+  takeProfit?: number | null;
+  stopLoss?: number | null;
+  expectedMovePercent?: number | null;
+  expectedMoveUsd?: number | null;
+  reasoning?: string | null;
+  bullishCount?: number;
+  bearishCount?: number;
+  createdAt?: number;
 }
 
 export type TradeRecordSide =
@@ -256,6 +299,7 @@ export interface BotConfig {
   minConfidence: number;
   enabledIndicators: string[];
   autoTrade: boolean;
+  useAiTargets: boolean;
   checkIntervalSeconds: number;
 }
 
@@ -269,6 +313,7 @@ export interface BotConfigUpdate {
   minConfidence?: number;
   enabledIndicators?: string[];
   autoTrade?: boolean;
+  useAiTargets?: boolean;
   checkIntervalSeconds?: number;
 }
 
@@ -345,6 +390,14 @@ export const AnalyzeDivergenceTimeframe = {
 
 export type GetPortfolioPositions200 = {
   positions: Position[];
+};
+
+export type GetActivePositions200 = {
+  positions: ActivePosition[];
+};
+
+export type GetLatestAiSignal200 = {
+  signal?: StoredAiSignal;
 };
 
 export type GetPortfolioHistoryParams = {

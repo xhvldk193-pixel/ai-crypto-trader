@@ -23,6 +23,7 @@ const botConfigSchema = z.object({
   takeProfitPercent: z.coerce.number().min(0.1).max(50),
   minConfidence: z.coerce.number().min(0.1).max(0.99),
   autoTrade: z.boolean(),
+  useAiTargets: z.boolean(),
 });
 
 type BotConfigFormValues = z.infer<typeof botConfigSchema>;
@@ -44,13 +45,14 @@ export default function BotControl() {
     resolver: zodResolver(botConfigSchema),
     defaultValues: {
       symbol: "BTC/USDT",
-      timeframe: "1h",
+      timeframe: "15m",
       tradeAmount: 100,
-      maxPositions: 3,
+      maxPositions: 1,
       stopLossPercent: 2,
       takeProfitPercent: 5,
       minConfidence: 0.7,
       autoTrade: false,
+      useAiTargets: true,
     },
   });
 
@@ -65,6 +67,7 @@ export default function BotControl() {
         takeProfitPercent: config.takeProfitPercent,
         minConfidence: config.minConfidence,
         autoTrade: config.autoTrade,
+        useAiTargets: config.useAiTargets ?? true,
       });
     }
   }, [config, form]);
@@ -251,6 +254,24 @@ export default function BotControl() {
                         </FormControl>
                         <FormDescription>거래를 트리거하는 임계값</FormDescription>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="useAiTargets"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">AI 자동 익절/손절</FormLabel>
+                          <FormDescription>
+                            켜면 AI가 예측한 변동폭으로 TP/SL을 자동 설정합니다. 끄면 위의 고정 % 값이 사용됩니다.
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
                       </FormItem>
                     )}
                   />

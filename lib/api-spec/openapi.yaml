@@ -191,6 +191,41 @@ paths:
                       $ref: "#/components/schemas/Position"
                 required: [positions]
 
+  /portfolio/active-positions:
+    get:
+      operationId: getActivePositions
+      tags: [portfolio]
+      summary: Get tracked active positions with AI-defined TP/SL
+      responses:
+        "200":
+          description: Active tracked positions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ActivePosition"
+                required: [positions]
+
+  /ai/latest-signal:
+    get:
+      operationId: getLatestAiSignal
+      tags: [ai]
+      summary: Get the most recent AI signal recorded by the bot
+      responses:
+        "200":
+          description: Latest AI signal (signal will be omitted when none yet)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signal:
+                    $ref: "#/components/schemas/StoredAiSignal"
+
   /portfolio/history:
     get:
       operationId: getPortfolioHistory
@@ -525,6 +560,15 @@ components:
           type: number
         suggestedTakeProfit:
           type: number
+        expectedMovePercent:
+          type: number
+          description: AI's predicted price move magnitude in percent (signed; positive = up, negative = down)
+        expectedMoveUsd:
+          type: number
+          description: AI's predicted absolute price move in USD
+        atrPercent:
+          type: number
+          description: Recent volatility (ATR / price) as a reference, in percent
         analyzedAt:
           type: number
       required: [action, confidence, reasoning, riskLevel, analyzedAt]
@@ -571,6 +615,86 @@ components:
         openedAt:
           type: number
       required: [symbol, side, entryPrice, currentPrice, quantity, pnl, pnlPercent, openedAt]
+
+    ActivePosition:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+        entryPrice:
+          type: number
+        currentPrice:
+          type: number
+        quantity:
+          type: number
+        takeProfit:
+          type: number
+        stopLoss:
+          type: number
+        expectedMovePercent:
+          type: number
+          nullable: true
+        aiConfidence:
+          type: number
+          nullable: true
+        aiReasoning:
+          type: string
+          nullable: true
+        triggeredBy:
+          type: string
+        unrealizedPnl:
+          type: number
+        unrealizedPnlPercent:
+          type: number
+        openedAt:
+          type: number
+      required: [id, symbol, side, entryPrice, currentPrice, quantity, takeProfit, stopLoss, triggeredBy, unrealizedPnl, unrealizedPnlPercent, openedAt]
+
+    StoredAiSignal:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        action:
+          type: string
+        confidence:
+          type: number
+        riskLevel:
+          type: string
+        currentPrice:
+          type: number
+        entryPrice:
+          type: number
+          nullable: true
+        takeProfit:
+          type: number
+          nullable: true
+        stopLoss:
+          type: number
+          nullable: true
+        expectedMovePercent:
+          type: number
+          nullable: true
+        expectedMoveUsd:
+          type: number
+          nullable: true
+        reasoning:
+          type: string
+          nullable: true
+        bullishCount:
+          type: integer
+        bearishCount:
+          type: integer
+        createdAt:
+          type: number
 
     TradeRecord:
       type: object
@@ -711,9 +835,11 @@ components:
             type: string
         autoTrade:
           type: boolean
+        useAiTargets:
+          type: boolean
         checkIntervalSeconds:
           type: integer
-      required: [symbol, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, checkIntervalSeconds]
+      required: [symbol, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds]
 
     BotConfigUpdate:
       type: object
@@ -737,6 +863,8 @@ components:
           items:
             type: string
         autoTrade:
+          type: boolean
+        useAiTargets:
           type: boolean
         checkIntervalSeconds:
           type: integer
