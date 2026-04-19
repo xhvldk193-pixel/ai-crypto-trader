@@ -37,6 +37,42 @@ interface AiDecision {
 
 type BotConfigRow = typeof botConfigTable.$inferSelect;
 
+interface SymbolOverride {
+  tradeAmount?: number | null;
+  minConfidence?: number | null;
+  takeProfitPercent?: number | null;
+  stopLossPercent?: number | null;
+}
+
+interface EffectiveParams {
+  tradeAmount: number;
+  minConfidence: number;
+  takeProfitPercent: number;
+  stopLossPercent: number;
+  overridden: string[];
+}
+
+function resolveEffectiveParams(config: BotConfigRow, symbol: string): EffectiveParams {
+  const overrides = (config.symbolOverrides as Record<string, SymbolOverride> | null) ?? {};
+  const o = overrides[symbol] ?? {};
+  const overridden: string[] = [];
+  const pick = <K extends keyof EffectiveParams>(key: K, base: number): number => {
+    const v = o[key as keyof SymbolOverride];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      overridden.push(key as string);
+      return v;
+    }
+    return base;
+  };
+  return {
+    tradeAmount: pick("tradeAmount", config.tradeAmount),
+    minConfidence: pick("minConfidence", config.minConfidence),
+    takeProfitPercent: pick("takeProfitPercent", config.takeProfitPercent),
+    stopLossPercent: pick("stopLossPercent", config.stopLossPercent),
+    overridden,
+  };
+}
+
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
@@ -340,7 +376,16 @@ class BotManager {
       decision.action
     );
 
-    if (config.autoTrade && decision.confidence >= config.minConfidence) {
+    const params = resolveEffectiveParams(config, symbol);
+    if (params.overridden.length > 0) {
+      await this.addLog(
+        "info",
+        `${symbol} 심볼별 오버라이드 적용: ${params.overridden.join(", ")} (금액 $${params.tradeAmount}, 신뢰도 ${params.minConfidence}, TP ${params.takeProfitPercent}% / SL ${params.stopLossPercent}%)`,
+        symbol,
+      );
+    }
+
+    if (config.autoTrade && decision.confidence >= params.minConfidence) {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
@@ -351,8 +396,8 @@ class BotManager {
         takeProfit = decision.suggestedTakeProfit;
         stopLoss = decision.suggestedStopLoss;
       } else {
-        takeProfit = entryPrice * (1 + dir * config.takeProfitPercent / 100);
-        stopLoss = entryPrice * (1 - dir * config.stopLossPercent / 100);
+        takeProfit = entryPrice * (1 + dir * params.takeProfitPercent / 100);
+        stopLoss = entryPrice * (1 - dir * params.stopLossPercent / 100);
       }
 
       let positionInserted = false;
@@ -362,7 +407,7 @@ class BotManager {
           if (existing.length > 0) {
             return;
           }
-          const quantity = config.tradeAmount / entryPrice;
+          const quantity = params.tradeAmount / entryPrice;
           await tx.insert(activePositionsTable).values({
             symbol,
             side,
@@ -388,7 +433,7 @@ class BotManager {
       }
 
       try {
-        const quantity = config.tradeAmount / entryPrice;
+        const quantity = params.tradeAmount / entryPrice;
         const order = await exchangeService.placeOrder(
           symbol,
           decision.action.toLowerCase(),
@@ -402,8 +447,8 @@ class BotManager {
           side: decision.action.toLowerCase(),
           price: entryPrice,
           quantity,
-          total: config.tradeAmount,
-          fee: config.tradeAmount * 0.001,
+          total: params.tradeAmount,
+          fee: params.tradeAmount * 0.001,
           pnl: 0,
           triggeredBy: "bot",
           exchangeOrderId: order.id,

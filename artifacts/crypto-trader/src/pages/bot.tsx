@@ -16,6 +16,18 @@ import { useToast } from "@/hooks/use-toast";
 import { Power, PowerOff, Activity, RefreshCw, Save } from "lucide-react";
 import { formatDate } from "@/lib/format";
 
+const overrideField = z
+  .union([z.literal(""), z.coerce.number().positive()])
+  .optional()
+  .transform((v) => (v === "" || v === undefined ? null : v));
+
+const symbolOverrideSchema = z.object({
+  tradeAmount: overrideField,
+  minConfidence: overrideField,
+  takeProfitPercent: overrideField,
+  stopLossPercent: overrideField,
+});
+
 const botConfigSchema = z.object({
   symbol: z.string().min(1),
   watchSymbols: z.array(z.string().min(1)).min(1, "최소 1개 이상의 페어를 선택하세요."),
@@ -32,6 +44,7 @@ const botConfigSchema = z.object({
   strictMtf: z.boolean(),
   mtfTimeframes: z.array(z.string().min(1)),
   useFundingRate: z.boolean(),
+  symbolOverrides: z.record(z.string(), symbolOverrideSchema).default({}),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -70,6 +83,7 @@ export default function BotControl() {
       strictMtf: true,
       mtfTimeframes: ["1h", "4h"],
       useFundingRate: true,
+      symbolOverrides: {},
     },
   });
 
@@ -94,6 +108,7 @@ export default function BotControl() {
         strictMtf: config.strictMtf ?? true,
         mtfTimeframes: config.mtfTimeframes && config.mtfTimeframes.length > 0 ? config.mtfTimeframes : ["1h", "4h"],
         useFundingRate: config.useFundingRate ?? true,
+        symbolOverrides: (config.symbolOverrides as Record<string, { tradeAmount?: number | null; minConfidence?: number | null; takeProfitPercent?: number | null; stopLossPercent?: number | null }>) ?? {},
       });
     }
   }, [config, form]);
@@ -437,6 +452,102 @@ export default function BotControl() {
                         </FormControl>
                       </FormItem>
                     )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="symbolOverrides"
+                    render={({ field }) => {
+                      const watchList = form.watch("watchSymbols") ?? [];
+                      const overrides = (field.value as Record<string, { tradeAmount?: number | null; minConfidence?: number | null; takeProfitPercent?: number | null; stopLossPercent?: number | null }>) ?? {};
+                      const setField = (sym: string, key: string, raw: string) => {
+                        const next = { ...overrides };
+                        const entry = { ...(next[sym] ?? {}) };
+                        if (raw === "") {
+                          delete (entry as Record<string, unknown>)[key];
+                        } else {
+                          const n = Number(raw);
+                          if (Number.isFinite(n)) (entry as Record<string, number>)[key] = n;
+                        }
+                        if (Object.keys(entry).length === 0) {
+                          delete next[sym];
+                        } else {
+                          next[sym] = entry;
+                        }
+                        field.onChange(next);
+                      };
+                      return (
+                        <FormItem className="rounded-lg border p-4 shadow-sm">
+                          <FormLabel className="text-base">심볼별 파라미터 오버라이드</FormLabel>
+                          <FormDescription>
+                            각 페어마다 거래 금액·최소 신뢰도·TP/SL%를 덮어쓸 수 있습니다. 비워두면 위의 기본값을 사용합니다.
+                          </FormDescription>
+                          <div className="mt-3 space-y-3 max-h-72 overflow-y-auto">
+                            {watchList.length === 0 && (
+                              <div className="text-xs text-muted-foreground">먼저 감시 페어를 선택하세요.</div>
+                            )}
+                            {watchList.map((sym) => {
+                              const o = overrides[sym] ?? {};
+                              const valOf = (k: keyof typeof o) =>
+                                o[k] === null || o[k] === undefined ? "" : String(o[k]);
+                              return (
+                                <div key={sym} className="rounded-md border bg-muted/30 p-3 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <Badge variant="secondary" className="font-mono">{sym}</Badge>
+                                    {Object.keys(o).length === 0 && (
+                                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">기본값 사용</span>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="text-xs space-y-1">
+                                      <span className="text-muted-foreground">거래 금액 (USD)</span>
+                                      <Input
+                                        type="number"
+                                        step="1"
+                                        placeholder="기본값"
+                                        value={valOf("tradeAmount")}
+                                        onChange={(e) => setField(sym, "tradeAmount", e.target.value)}
+                                      />
+                                    </label>
+                                    <label className="text-xs space-y-1">
+                                      <span className="text-muted-foreground">최소 신뢰도 (0–1)</span>
+                                      <Input
+                                        type="number"
+                                        step="0.05"
+                                        placeholder="기본값"
+                                        value={valOf("minConfidence")}
+                                        onChange={(e) => setField(sym, "minConfidence", e.target.value)}
+                                      />
+                                    </label>
+                                    <label className="text-xs space-y-1">
+                                      <span className="text-muted-foreground">익절 (%)</span>
+                                      <Input
+                                        type="number"
+                                        step="0.1"
+                                        placeholder="기본값"
+                                        value={valOf("takeProfitPercent")}
+                                        onChange={(e) => setField(sym, "takeProfitPercent", e.target.value)}
+                                      />
+                                    </label>
+                                    <label className="text-xs space-y-1">
+                                      <span className="text-muted-foreground">손절 (%)</span>
+                                      <Input
+                                        type="number"
+                                        step="0.1"
+                                        placeholder="기본값"
+                                        value={valOf("stopLossPercent")}
+                                        onChange={(e) => setField(sym, "stopLossPercent", e.target.value)}
+                                      />
+                                    </label>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
                   />
 
                   <FormField

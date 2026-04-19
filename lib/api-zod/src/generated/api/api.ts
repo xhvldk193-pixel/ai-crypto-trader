@@ -457,6 +457,23 @@ export const GetBotConfigResponse = zod.object({
   strictMtf: zod.boolean(),
   mtfTimeframes: zod.array(zod.string()),
   useFundingRate: zod.boolean(),
+  symbolOverrides: zod
+    .record(
+      zod.string(),
+      zod
+        .object({
+          tradeAmount: zod.number().nullish(),
+          minConfidence: zod.number().nullish(),
+          takeProfitPercent: zod.number().nullish(),
+          stopLossPercent: zod.number().nullish(),
+        })
+        .describe(
+          "Optional per-symbol overrides. Omitted\/null fields fall back to the global bot config.",
+        ),
+    )
+    .describe(
+      'Per-symbol parameter overrides keyed by symbol (e.g. \"BTC\/USDT\").',
+    ),
 });
 
 /**
@@ -480,6 +497,21 @@ export const UpdateBotConfigBody = zod.object({
   strictMtf: zod.boolean().optional(),
   mtfTimeframes: zod.array(zod.string()).optional(),
   useFundingRate: zod.boolean().optional(),
+  symbolOverrides: zod
+    .record(
+      zod.string(),
+      zod
+        .object({
+          tradeAmount: zod.number().nullish(),
+          minConfidence: zod.number().nullish(),
+          takeProfitPercent: zod.number().nullish(),
+          stopLossPercent: zod.number().nullish(),
+        })
+        .describe(
+          "Optional per-symbol overrides. Omitted\/null fields fall back to the global bot config.",
+        ),
+    )
+    .optional(),
 });
 
 export const UpdateBotConfigResponse = zod.object({
@@ -500,6 +532,23 @@ export const UpdateBotConfigResponse = zod.object({
   strictMtf: zod.boolean(),
   mtfTimeframes: zod.array(zod.string()),
   useFundingRate: zod.boolean(),
+  symbolOverrides: zod
+    .record(
+      zod.string(),
+      zod
+        .object({
+          tradeAmount: zod.number().nullish(),
+          minConfidence: zod.number().nullish(),
+          takeProfitPercent: zod.number().nullish(),
+          stopLossPercent: zod.number().nullish(),
+        })
+        .describe(
+          "Optional per-symbol overrides. Omitted\/null fields fall back to the global bot config.",
+        ),
+    )
+    .describe(
+      'Per-symbol parameter overrides keyed by symbol (e.g. \"BTC\/USDT\").',
+    ),
 });
 
 /**

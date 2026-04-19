@@ -928,7 +928,12 @@ components:
             type: string
         useFundingRate:
           type: boolean
-      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate]
+        symbolOverrides:
+          type: object
+          description: Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT").
+          additionalProperties:
+            $ref: "#/components/schemas/SymbolOverride"
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides]
 
     BotConfigUpdate:
       type: object
@@ -973,6 +978,23 @@ components:
             type: string
         useFundingRate:
           type: boolean
+        symbolOverrides:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/SymbolOverride"
+
+    SymbolOverride:
+      type: object
+      description: Optional per-symbol overrides. Omitted/null fields fall back to the global bot config.
+      properties:
+        tradeAmount:
+          type: [number, "null"]
+        minConfidence:
+          type: [number, "null"]
+        takeProfitPercent:
+          type: [number, "null"]
+        stopLossPercent:
+          type: [number, "null"]
 
     BotLog:
       type: object

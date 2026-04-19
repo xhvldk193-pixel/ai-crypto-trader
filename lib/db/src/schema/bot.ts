@@ -2,6 +2,13 @@ import { pgTable, text, real, integer, boolean, timestamp, serial, jsonb, unique
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
+export interface SymbolOverride {
+  tradeAmount?: number | null;
+  minConfidence?: number | null;
+  takeProfitPercent?: number | null;
+  stopLossPercent?: number | null;
+}
+
 export const botConfigTable = pgTable("bot_config", {
   id: serial("id").primaryKey(),
   symbol: text("symbol").notNull().default("BTC/USDT"),
@@ -21,6 +28,7 @@ export const botConfigTable = pgTable("bot_config", {
   strictMtf: boolean("strict_mtf").notNull().default(true),
   mtfTimeframes: jsonb("mtf_timeframes").$type<string[]>().notNull().default(["1h","4h"]),
   useFundingRate: boolean("use_funding_rate").notNull().default(true),
+  symbolOverrides: jsonb("symbol_overrides").$type<Record<string, SymbolOverride>>().notNull().default({}),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

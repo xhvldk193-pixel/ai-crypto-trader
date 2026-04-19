@@ -66,6 +66,9 @@ router.put("/config", async (req, res) => {
       updateData.mtfTimeframes = Array.from(new Set(cleaned));
     }
     if (body.useFundingRate !== undefined) updateData.useFundingRate = body.useFundingRate;
+    if (body.symbolOverrides !== undefined && body.symbolOverrides && typeof body.symbolOverrides === "object") {
+      updateData.symbolOverrides = sanitizeSymbolOverrides(body.symbolOverrides as Record<string, unknown>);
+    }
     updateData.updatedAt = new Date();
 
     let updated;
@@ -136,6 +139,25 @@ router.get("/reflections", async (req, res) => {
   }
 });
 
+function sanitizeSymbolOverrides(input: Record<string, unknown>): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  const numericKeys = ["tradeAmount", "minConfidence", "takeProfitPercent", "stopLossPercent"] as const;
+  for (const [sym, raw] of Object.entries(input)) {
+    if (!sym || typeof sym !== "string") continue;
+    if (!raw || typeof raw !== "object") continue;
+    const entry: Record<string, number> = {};
+    const r = raw as Record<string, unknown>;
+    for (const k of numericKeys) {
+      const v = r[k];
+      if (v === null || v === undefined || v === "") continue;
+      const n = typeof v === "number" ? v : Number(v);
+      if (Number.isFinite(n)) entry[k] = n;
+    }
+    if (Object.keys(entry).length > 0) out[sym] = entry;
+  }
+  return out;
+}
+
 function configToResponse(row: typeof botConfigTable.$inferSelect) {
   const watchSymbols = Array.isArray(row.watchSymbols) && row.watchSymbols.length > 0
     ? (row.watchSymbols as string[])
@@ -158,6 +180,7 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     strictMtf: row.strictMtf,
     mtfTimeframes: (row.mtfTimeframes as string[]) ?? ["1h", "4h"],
     useFundingRate: row.useFundingRate,
+    symbolOverrides: (row.symbolOverrides as Record<string, Record<string, number>>) ?? {},
   };
 }
 

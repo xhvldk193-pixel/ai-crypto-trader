@@ -292,6 +292,25 @@ export interface BotStatus {
   halted: boolean;
 }
 
+/**
+ * Optional per-symbol overrides. Omitted/null fields fall back to the global bot config.
+ */
+export interface SymbolOverride {
+  /** @nullable */
+  tradeAmount?: number | null;
+  /** @nullable */
+  minConfidence?: number | null;
+  /** @nullable */
+  takeProfitPercent?: number | null;
+  /** @nullable */
+  stopLossPercent?: number | null;
+}
+
+/**
+ * Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT").
+ */
+export type BotConfigSymbolOverrides = { [key: string]: SymbolOverride };
+
 export interface BotConfig {
   symbol: string;
   watchSymbols: string[];
@@ -310,7 +329,11 @@ export interface BotConfig {
   strictMtf: boolean;
   mtfTimeframes: string[];
   useFundingRate: boolean;
+  /** Per-symbol parameter overrides keyed by symbol (e.g. "BTC/USDT"). */
+  symbolOverrides: BotConfigSymbolOverrides;
 }
+
+export type BotConfigUpdateSymbolOverrides = { [key: string]: SymbolOverride };
 
 export interface BotConfigUpdate {
   symbol?: string;
@@ -330,6 +353,7 @@ export interface BotConfigUpdate {
   strictMtf?: boolean;
   mtfTimeframes?: string[];
   useFundingRate?: boolean;
+  symbolOverrides?: BotConfigUpdateSymbolOverrides;
 }
 
 export type BotLogLevel = (typeof BotLogLevel)[keyof typeof BotLogLevel];
