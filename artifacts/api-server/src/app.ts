@@ -4,6 +4,8 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/auth";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app: Express = express();
 
@@ -63,5 +65,18 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(sessionMiddleware);
 
 app.use("/api", router);
+
+// In production, serve the built frontend static files and fall back to index.html for SPA routing
+if (process.env.NODE_ENV === "production") {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const publicDir = path.resolve(__dirname, "../public");
+
+  app.use(express.static(publicDir));
+
+  app.get("/{*splat}", (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith("/api/")) return next();
+    res.sendFile(path.join(publicDir, "index.html"));
+  });
+}
 
 export default app;
