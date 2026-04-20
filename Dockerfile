@@ -8,6 +8,8 @@ ENV PATH="$PNPM_HOME:$PATH"
 # slim 이미지에서는 설정을 명확히 하기 위해 설치 위치를 지정해주는 것이 좋습니다.
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
+
+
 # 3. 작업 디렉토리 설정
 WORKDIR /app
 
