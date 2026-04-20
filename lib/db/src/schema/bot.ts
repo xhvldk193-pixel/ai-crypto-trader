@@ -22,7 +22,7 @@ export const botConfigTable = pgTable("bot_config", {
   enabledIndicators: jsonb("enabled_indicators").notNull().default(["MACD","RSI","Stoch","CCI","MOM","OBV","VWMACD","CMF","MFI"]),
   autoTrade: boolean("auto_trade").notNull().default(false),
   useAiTargets: boolean("use_ai_targets").notNull().default(true),
-  checkIntervalSeconds: integer("check_interval_seconds").notNull().default(60),
+  checkIntervalSeconds: integer("check_interval_seconds").notNull().default(900),
   maxDailyLossPercent: real("max_daily_loss_percent").notNull().default(3),
   useMtfFilter: boolean("use_mtf_filter").notNull().default(true),
   strictMtf: boolean("strict_mtf").notNull().default(true),
