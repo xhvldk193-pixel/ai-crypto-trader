@@ -646,6 +646,62 @@ class BotManager {
         const msg = err instanceof Error ? err.message : String(err);
         await this.addLog("error", `거래 실행 실패 (${symbol}): ${msg}`, symbol);
         await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, `entry-fail-${symbol}`);
+
+        // Record failed entry as a reflection so the AI keeps learning even when no position opens
+        try {
+          let bullishCount = 0, bearishCount = 0;
+          try {
+            const recent = await db.select().from(aiSignalsTable)
+              .where(eq(aiSignalsTable.symbol, symbol))
+              .orderBy(desc(aiSignalsTable.createdAt))
+              .limit(1);
+            if (recent.length > 0) {
+              bullishCount = recent[0].bullishCount;
+              bearishCount = recent[0].bearishCount;
+            }
+          } catch {
+            // best-effort
+          }
+
+          const [reflectionRow] = await db.insert(tradeReflectionsTable).values({
+            symbol,
+            timeframe: config.timeframe,
+            side,
+            entryPrice,
+            exitPrice: entryPrice,
+            exitReason: "ENTRY_FAILED",
+            pnl: 0,
+            pnlPercent: 0,
+            holdSeconds: 0,
+            originalConfidence: decision.confidence,
+            originalExpectedMovePercent: decision.expectedMovePercent,
+            originalReasoning: decision.reasoning,
+            bullishCount,
+            bearishCount,
+            lessonText: `진입 실패 사유: ${msg}`,
+          }).returning();
+
+          if (reflectionRow) {
+            this.writeReflectionLesson(reflectionRow.id, {
+              symbol,
+              timeframe: config.timeframe,
+              side,
+              entryPrice,
+              exitPrice: entryPrice,
+              exitReason: "ENTRY_FAILED",
+              pnlPercent: 0,
+              holdSeconds: 0,
+              originalConfidence: decision.confidence,
+              originalExpectedMovePercent: decision.expectedMovePercent,
+              originalReasoning: decision.reasoning,
+              bullishCount,
+              bearishCount,
+              failureMessage: msg,
+            }).catch((e) => logger.warn({ err: e, id: reflectionRow.id }, "Failed-entry reflection lesson generation failed"));
+          }
+        } catch (refErr) {
+          logger.warn({ err: refErr, symbol }, "Failed to record failed-entry reflection");
+        }
       }
     }
   }
@@ -955,9 +1011,26 @@ class BotManager {
     originalReasoning: string | null;
     bullishCount: number;
     bearishCount: number;
+    failureMessage?: string;
   }) {
-    const verdict = ctx.exitReason === "TP" ? "성공" : "실패";
-    const userMessage = `다음은 방금 종료된 자동 매매의 결과입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
+    const isFailedEntry = ctx.exitReason === "ENTRY_FAILED";
+    const verdict = isFailedEntry ? "진입실패" : ctx.exitReason === "TP" ? "성공" : "실패";
+    const userMessage = isFailedEntry
+      ? `다음은 봇이 거래소에 주문을 넣었으나 실패한 케이스입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
+실패 원인을 짧게 짚고, 다음에 같은 상황을 피하기 위해 AI가 신호 단계에서 어떻게 판단을 보완해야 하는지 구체적 규칙으로 적으세요.
+예) "잔고 부족 반복 시 신뢰도 임계값 상향", "특정 시간대 회피", "변동성 급등 시 진입 보류" 등.
+
+신호 정보:
+- 심볼: ${ctx.symbol}, 타임프레임: ${ctx.timeframe}, 방향: ${ctx.side.toUpperCase()}
+- 진입 시도가 (${ctx.entryPrice.toFixed(4)})
+- 진입 시 강세 다이버전스 ${ctx.bullishCount}개 / 약세 ${ctx.bearishCount}개
+- AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
+- 예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
+- 진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
+- 거래소 실패 메시지: ${ctx.failureMessage ?? "알 수 없음"}
+
+JSON 없이, 순수 한국어 텍스트만 출력하세요.`
+      : `다음은 방금 종료된 자동 매매의 결과입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
 다음에 비슷한 상황에서 AI가 참고할 수 있게 핵심 교훈만 짧고 구체적으로 적으세요.
 "이런 조건일 때 진입을 보류한다", "이런 조합은 신뢰도를 더 높여서 본다" 같은 실용적 지침 위주로 작성하세요.
 
@@ -1008,7 +1081,7 @@ JSON 없이, 순수 한국어 텍스트만 출력하세요.`;
       }
       if (rows.length === 0) return "  (아직 복기 데이터 없음)";
       return rows.map((r) => {
-        const verdict = r.exitReason === "TP" ? "✓익절" : r.exitReason === "SL" ? "✗손절" : r.exitReason;
+        const verdict = r.exitReason === "TP" ? "✓익절" : r.exitReason === "SL" ? "✗손절" : r.exitReason === "ENTRY_FAILED" ? "⚠진입실패" : r.exitReason;
         const pnlPart = `${r.pnlPercent >= 0 ? "+" : ""}${r.pnlPercent.toFixed(2)}%`;
         const lesson = r.lessonText ? r.lessonText.replace(/\s+/g, " ").trim() : "(복기 노트 생성 중)";
         return `  - [${verdict} ${pnlPart}] ${r.symbol} ${r.side.toUpperCase()} 강세${r.bullishCount}/약세${r.bearishCount}: ${lesson}`;
