@@ -413,10 +413,21 @@ class BotManager {
     }
 
     const divergence = analyzeDivergences(candles, symbol, config.timeframe);
-    const hasDivergence = divergence.bullishCount >= 2 || divergence.bearishCount >= 2;
+    const hasDivergence = divergence.bullishCount > 0 || divergence.bearishCount > 0;
 
     if (!hasDivergence) {
-      await this.addLog("info", `${symbol} @ $${ticker.price.toFixed(2)} — 다이버전스 신호 부족 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}, 최소 2개 필요) (관망)`, symbol);
+      await this.addLog("info", `${symbol} @ $${ticker.price.toFixed(2)} — 다이버전스 없음 (관망, AI 호출 스킵)`, symbol);
+      return;
+    }
+
+    // 신호 강도가 너무 약하면 AI 호출 스킵 (양쪽 다 1개 이하면 노이즈로 판단)
+    const strongEnough = divergence.bullishCount >= 2 || divergence.bearishCount >= 2;
+    if (!strongEnough) {
+      await this.addLog(
+        "info",
+        `${symbol} @ $${ticker.price.toFixed(2)} — 신호 약함 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}, AI 호출 스킵)`,
+        symbol,
+      );
       return;
     }
 
@@ -457,10 +468,11 @@ class BotManager {
 
     this.lastSignal = decision.action;
 
+    // HOLD면 DB 저장 스킵하고 바로 리턴 (불필요한 DB write + 토큰 낭비 방지)
     if (decision.action === "HOLD") {
       await this.addLog(
         "info",
-        `${symbol} @ $${ticker.price.toFixed(2)} — 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount})`,
+        `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount})`,
         symbol
       );
       return;
@@ -1020,6 +1032,38 @@ class BotManager {
   }
 
   /** Async: ask Claude to write a 2-3 sentence Korean post-mortem note */
+  // ── 역할별 반성 시스템 프롬프트 ──────────────────────────
+  private static readonly ROLE_SYSTEMS: Record<string, string> = {
+    analyst: `당신은 암호화폐 트레이딩 봇의 Analyst Reflection Coach 입니다.
+지난 종합 판단과 실제 시장 움직임을 대조해 교훈을 뽑아내는 역할입니다.
+원칙: 결과론적 비난 금지. 놓친 단서와 과대평가한 근거를 분리 서술. 타이밍까지 평가.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    bull: `당신은 암호화폐 트레이딩 봇의 Bull Reflection Coach 입니다.
+과거 상방 논거가 실제 가격과 얼마나 정합했는지 평가합니다.
+원칙: 작동한 근거와 실패한 근거 분리. 하방 신호 중 맞아떨어진 것 인정. 다음 상방 신호 구체화.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    bear: `당신은 암호화폐 트레이딩 봇의 Bear Reflection Coach 입니다.
+과거 하방 논거가 실제 가격과 얼마나 정합했는지 평가합니다.
+원칙: 작동한 근거와 실패한 근거 분리. 상방 신호 중 맞아떨어진 것 인정. 다음 하방 신호 구체화.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    judge: `당신은 암호화폐 트레이딩 봇의 Judge Reflection Coach 입니다.
+과거 최종 판정이 실제 결과와 일치했는지 평가합니다.
+원칙: 판정 방향 일치 여부 평가. 강세/약세 중 어느 쪽이 더 정합했는지 사후 분석. 패턴 추출.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    aggressive: `당신은 암호화폐 트레이딩 봇의 Aggressive Risk Reflection Coach 입니다.
+공격적 진입 판단이 실제 결과와 맞았는지 평가합니다.
+원칙: 리스크 대비 수익 평가. 보수적 우려가 현실이 된 경우 인정. 공격적 진입 정당화 조건 정밀화.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    conservative: `당신은 암호화폐 트레이딩 봇의 Conservative Risk Reflection Coach 입니다.
+보수적 판단이 실제 결과와 맞았는지 평가합니다.
+원칙: 기회비용 vs 손실 방어 평가. 과도한 방어로 놓친 기회 인정. 보수적 관망 정당화 조건 정밀화.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+    neutral: `당신은 암호화폐 트레이딩 봇의 Neutral Risk Reflection Coach 입니다.
+균형적 판단이 R:R 관점에서 최적이었는지 평가합니다.
+원칙: 중도 접근 효과 평가. 공격/보수 중 어느 쪽이 더 나은 결과를 냈는지 확인. 분할 전략 효과 평가.
+출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
+  };
+
   private async writeReflectionLesson(reflectionId: number, ctx: {
     symbol: string;
     timeframe: string;
@@ -1037,53 +1081,49 @@ class BotManager {
     failureMessage?: string;
   }) {
     const isFailedEntry = ctx.exitReason === "ENTRY_FAILED";
-    const verdict = isFailedEntry ? "진입실패" : ctx.exitReason === "TP" ? "성공" : "실패";
-    const userMessage = isFailedEntry
-      ? `다음은 봇이 거래소에 주문을 넣었으나 실패한 케이스입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
-실패 원인을 짧게 짚고, 다음에 같은 상황을 피하기 위해 AI가 신호 단계에서 어떻게 판단을 보완해야 하는지 구체적 규칙으로 적으세요.
-예) "잔고 부족 반복 시 신뢰도 임계값 상향", "특정 시간대 회피", "변동성 급등 시 진입 보류" 등.
+    const verdict = isFailedEntry ? "진입실패" : ctx.exitReason === "TP" ? "성공(익절)" : "실패(손절)";
 
-신호 정보:
-- 심볼: ${ctx.symbol}, 타임프레임: ${ctx.timeframe}, 방향: ${ctx.side.toUpperCase()}
-- 진입 시도가 (${ctx.entryPrice.toFixed(4)})
-- 진입 시 강세 다이버전스 ${ctx.bullishCount}개 / 약세 ${ctx.bearishCount}개
-- AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
-- 예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
-- 진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
-- 거래소 실패 메시지: ${ctx.failureMessage ?? "알 수 없음"}
+    const tradeInfo = isFailedEntry
+      ? `심볼: ${ctx.symbol} | 방향: ${ctx.side.toUpperCase()} | 결과: ${verdict}
+진입시도가: $${ctx.entryPrice.toFixed(4)}
+강세 다이버전스: ${ctx.bullishCount}개 / 약세: ${ctx.bearishCount}개
+AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
+예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
+진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
+실패 메시지: ${ctx.failureMessage ?? "알 수 없음"}`
+      : `심볼: ${ctx.symbol} | 방향: ${ctx.side.toUpperCase()} | 결과: ${verdict}
+손익: ${ctx.pnlPercent >= 0 ? "+" : ""}${ctx.pnlPercent.toFixed(2)}% | 보유: ${Math.floor(ctx.holdSeconds / 60)}분
+진입가: $${ctx.entryPrice.toFixed(4)} → 청산가: $${ctx.exitPrice.toFixed(4)}
+강세 다이버전스: ${ctx.bullishCount}개 / 약세: ${ctx.bearishCount}개
+AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
+예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
+진입 근거: ${ctx.originalReasoning ?? "기록 없음"}`;
 
-JSON 없이, 순수 한국어 텍스트만 출력하세요.`
-      : `다음은 방금 종료된 자동 매매의 결과입니다. 2-3문장의 한국어 복기 노트를 작성하세요.
-다음에 비슷한 상황에서 AI가 참고할 수 있게 핵심 교훈만 짧고 구체적으로 적으세요.
-"이런 조건일 때 진입을 보류한다", "이런 조합은 신뢰도를 더 높여서 본다" 같은 실용적 지침 위주로 작성하세요.
+    const roles = ["analyst", "bull", "bear", "judge", "aggressive", "conservative", "neutral"];
+    const results = await Promise.allSettled(
+      roles.map(async (role) => {
+        const msg = await anthropic.messages.create({
+          model: ANTHROPIC_MODEL,
+          max_tokens: 512,
+          system: BotManager.ROLE_SYSTEMS[role],
+          messages: [{ role: "user", content: `다음 거래 결과에 대해 반성 노트를 작성하세요.\n\n${tradeInfo}` }],
+        });
+        const block = msg.content[0];
+        return block && block.type === "text" ? `[${role}]\n${block.text.trim()}` : "";
+      })
+    );
 
-거래 정보:
-- 심볼: ${ctx.symbol}, 타임프레임: ${ctx.timeframe}, 방향: ${ctx.side.toUpperCase()}
-- 결과: ${verdict} (${ctx.exitReason}) — 손익 ${ctx.pnlPercent >= 0 ? "+" : ""}${ctx.pnlPercent.toFixed(2)}%
-- 진입가 $${ctx.entryPrice.toFixed(4)} → 청산가 $${ctx.exitPrice.toFixed(4)}, 보유 ${Math.floor(ctx.holdSeconds / 60)}분
-- 진입 시 강세 다이버전스 ${ctx.bullishCount}개 / 약세 ${ctx.bearishCount}개
-- 당시 AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
-- 당시 예측 변동: ${ctx.originalExpectedMovePercent !== null ? (ctx.originalExpectedMovePercent >= 0 ? "+" : "") + ctx.originalExpectedMovePercent.toFixed(2) + "%" : "미상"}
-- 당시 진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
+    const lessonParts = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === "fulfilled" && !!r.value)
+      .map((r) => r.value);
 
-JSON 없이, 순수 한국어 텍스트만 출력하세요.`;
+    if (lessonParts.length === 0) return;
 
-    try {
-      const message = await anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 512,
-        system: "당신은 트레이딩 봇의 복기를 돕는 분석가입니다. 결과의 원인과 다음에 적용할 구체적 규칙을 짧고 명확하게 작성합니다.",
-        messages: [{ role: "user", content: userMessage }],
-      });
-      const block = message.content[0];
-      const text = block && block.type === "text" ? block.text.trim() : "";
-      if (!text) return;
-      await db.update(tradeReflectionsTable).set({ lessonText: text }).where(eq(tradeReflectionsTable.id, reflectionId));
-    } catch (err) {
-      logger.warn({ err, reflectionId }, "Failed to generate reflection lesson");
-    }
+    await db.update(tradeReflectionsTable)
+      .set({ lessonText: lessonParts.join("\n\n") })
+      .where(eq(tradeReflectionsTable.id, reflectionId))
+      .catch((err) => logger.warn({ err, reflectionId }, "Failed to save reflection lesson"));
   }
-
   /** Fetch recent reflections for a symbol (and a few global) for AI context */
   private async fetchRecentReflections(symbol: string): Promise<string> {
     try {
