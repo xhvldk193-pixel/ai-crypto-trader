@@ -8,7 +8,7 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
 import { notifyAlert } from "./telegram";
 
-const ANTHROPIC_MODEL = "claude-opus-4-7";
+const ANTHROPIC_MODEL = "claude-haiku-4-5";
 
 interface BotStatus {
   running: boolean;

@@ -8,7 +8,7 @@ import { analyzeDivergences } from "../lib/divergence";
 
 const router = Router();
 
-const ANTHROPIC_MODEL = "claude-opus-4-7";
+const ANTHROPIC_MODEL = "claude-haiku-4-5";
 
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
