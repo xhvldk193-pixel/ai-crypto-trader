@@ -614,6 +614,7 @@ export const GetBotConfigResponse = zod.object({
   usePartialTp: zod.boolean(),
   partialTpPercent: zod.number(),
   entryMode: zod.enum(["fixed", "full"]),
+  paperTrading: zod.boolean(),
 });
 
 /**
@@ -661,6 +662,7 @@ export const UpdateBotConfigBody = zod.object({
   usePartialTp: zod.boolean().optional(),
   partialTpPercent: zod.number().optional(),
   entryMode: zod.enum(["fixed", "full"]).optional(),
+  paperTrading: zod.boolean().optional(),
 });
 
 export const UpdateBotConfigResponse = zod.object({
@@ -707,6 +709,7 @@ export const UpdateBotConfigResponse = zod.object({
   usePartialTp: zod.boolean(),
   partialTpPercent: zod.number(),
   entryMode: zod.enum(["fixed", "full"]),
+  paperTrading: zod.boolean(),
 });
 
 /**

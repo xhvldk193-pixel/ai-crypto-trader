@@ -55,6 +55,7 @@ const botConfigSchema = z.object({
   usePartialTp: z.boolean(),
   partialTpPercent: z.coerce.number().min(10).max(90),
   entryMode: z.enum(["fixed", "full"]),
+  paperTrading: z.boolean(),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -119,6 +120,7 @@ export default function BotControl() {
       usePartialTp: false,
       partialTpPercent: 50,
       entryMode: "fixed",
+      paperTrading: true,
     },
   });
 
@@ -156,6 +158,7 @@ export default function BotControl() {
         usePartialTp: config.usePartialTp ?? false,
         partialTpPercent: config.partialTpPercent ?? 50,
         entryMode: ((config as { entryMode?: string }).entryMode as "fixed" | "full") ?? "fixed",
+        paperTrading: (config as { paperTrading?: boolean }).paperTrading ?? true,
       });
     }
   }, [config, form]);
@@ -321,6 +324,25 @@ export default function BotControl() {
                           </SelectContent>
                         </Select>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="paperTrading"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3">
+                        <div className="space-y-0.5">
+                          <FormLabel>페이퍼 트레이딩 (가상 매매)</FormLabel>
+                          <FormDescription>
+                            ON: AI가 가상으로 매수·매도해서 학습합니다. 실거래소 주문 안 들어가고 자금도 사용 안 함.
+                            OFF: 실제 Binance 선물 계좌에서 진짜 거래 실행.
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
                       </FormItem>
                     )}
                   />

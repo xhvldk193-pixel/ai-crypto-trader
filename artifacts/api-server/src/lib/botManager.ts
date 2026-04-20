@@ -303,8 +303,9 @@ class BotManager {
     const exMap = new Map<string, typeof exchangePositions[number]>();
     for (const ex of exchangePositions) exMap.set(`${normalize(ex.symbol)}|${ex.side}`, ex);
 
-    // 1) Remove DB rows that have no on-exchange position
+    // 1) Remove DB rows that have no on-exchange position (skip paper positions)
     for (const dbPos of dbPositions) {
+      if (dbPos.triggeredBy === "paper") continue;
       const k = `${dbPos.symbol}|${dbPos.side}`;
       if (!exMap.has(k)) {
         await db.delete(activePositionsTable).where(eq(activePositionsTable.id, dbPos.id));
@@ -533,7 +534,8 @@ class BotManager {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
-      if ((config.entryMode ?? "fixed") === "full") {
+      const isPaper = config.paperTrading ?? true;
+      if (!isPaper && (config.entryMode ?? "fixed") === "full") {
         try {
           const bal = await exchangeService.getBalance();
           const usdt = bal.balances.find((b) => b.asset === "USDT");
@@ -613,14 +615,27 @@ class BotManager {
         const notional = params.tradeAmount * leverage;
         const quantity = notional / entryPrice;
         const positionSide = side === "long" ? "LONG" : "SHORT";
-        const order = await exchangeService.placeOrder(
-          symbol,
-          decision.action.toLowerCase(),
-          "market",
-          quantity,
-          undefined,
-          { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" },
-        );
+
+        let exchangeOrderId: string | undefined;
+        if (isPaper) {
+          // Paper trading: skip real exchange order, mark position as "paper"
+          await db.update(activePositionsTable)
+            .set({ quantity, triggeredBy: "paper" })
+            .where(eq(activePositionsTable.symbol, symbol));
+        } else {
+          const order = await exchangeService.placeOrder(
+            symbol,
+            decision.action.toLowerCase(),
+            "market",
+            quantity,
+            undefined,
+            { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" },
+          );
+          exchangeOrderId = order.id;
+          await db.update(activePositionsTable)
+            .set({ quantity })
+            .where(eq(activePositionsTable.symbol, symbol));
+        }
         this.executedTrades++;
 
         await db.insert(tradeHistoryTable).values({
@@ -631,13 +646,13 @@ class BotManager {
           total: params.tradeAmount,
           fee: params.tradeAmount * 0.001,
           pnl: 0,
-          triggeredBy: "bot",
-          exchangeOrderId: order.id,
+          triggeredBy: isPaper ? "paper" : "bot",
+          exchangeOrderId,
         });
 
         await this.addLog(
           "trade",
-          `진입 ${decision.action} ${symbol} @ $${entryPrice.toFixed(2)} | TP $${takeProfit.toFixed(2)} / SL $${stopLoss.toFixed(2)}`,
+          `${isPaper ? "[가상] " : ""}진입 ${decision.action} ${symbol} @ $${entryPrice.toFixed(2)} | TP $${takeProfit.toFixed(2)} / SL $${stopLoss.toFixed(2)}`,
           symbol,
           decision.action
         );
@@ -818,22 +833,27 @@ class BotManager {
         if (tpHit) {
           try {
             const positionSide = isLong ? "LONG" : "SHORT";
+            const isPaperPos = pos.triggeredBy === "paper";
             let actualQty = pos.quantity;
-            try {
-              const onEx = await exchangeService.getPositionAmount(pos.symbol, positionSide);
-              if (onEx > 0) actualQty = onEx;
-            } catch { /* fall back to DB */ }
+            if (!isPaperPos) {
+              try {
+                const onEx = await exchangeService.getPositionAmount(pos.symbol, positionSide);
+                if (onEx > 0) actualQty = onEx;
+              } catch { /* fall back to DB */ }
+            }
             const partPct = (config.partialTpPercent ?? 50) / 100;
             const closeQty = actualQty * partPct;
             if (closeQty > 0) {
-              await exchangeService.placeOrder(
-                pos.symbol,
-                isLong ? "sell" : "buy",
-                "market",
-                closeQty,
-                undefined,
-                { positionSide, reduceOnly: true },
-              );
+              if (!isPaperPos) {
+                await exchangeService.placeOrder(
+                  pos.symbol,
+                  isLong ? "sell" : "buy",
+                  "market",
+                  closeQty,
+                  undefined,
+                  { positionSide, reduceOnly: true },
+                );
+              }
               const realized = (price - pos.entryPrice) * closeQty * (isLong ? 1 : -1);
               await db.insert(tradeHistoryTable).values({
                 symbol: pos.symbol,
@@ -843,7 +863,7 @@ class BotManager {
                 total: price * closeQty,
                 fee: price * closeQty * 0.001,
                 pnl: realized,
-                triggeredBy: "bot",
+                triggeredBy: isPaperPos ? "paper" : "bot",
               });
               // Move SL to breakeven (entry) and mark partial done
               // Extend TP to 2x original distance so the remainder can be fully closed at a second TP
@@ -858,7 +878,7 @@ class BotManager {
               pos.stopLoss = pos.entryPrice;
               pos.takeProfit = extendedTp;
               pos.quantity = actualQty - closeQty;
-              const successMsg = `부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)}) | 잔여 TP → $${extendedTp.toFixed(4)}`;
+              const successMsg = `${isPaperPos ? "[가상] " : ""}부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)}) | 잔여 TP → $${extendedTp.toFixed(4)}`;
               await this.addLog("trade", successMsg, pos.symbol);
               await this.maybeNotify("info", `✅ ${successMsg}`, `partial-tp-ok-${pos.symbol}-${pos.id}`);
             }
@@ -877,36 +897,39 @@ class BotManager {
       if (!tpHit && !slHit) return;
 
       const exitReason = tpHit ? "TP" : "SL";
+      const isPaperPos = pos.triggeredBy === "paper";
       try {
         const positionSide = isLong ? "LONG" : "SHORT";
         // Always trust the exchange for actual quantity to avoid -2022 ReduceOnly rejections
         let actualQty = pos.quantity;
-        try {
-          const onExchange = await exchangeService.getPositionAmount(pos.symbol, positionSide);
-          if (onExchange <= 0) {
-            // Position no longer exists on Binance (manually closed, liquidated, or never opened).
-            // Just clean up DB and skip the close order.
-            await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
-            await this.addLog(
-              "warning",
-              `${pos.symbol} ${positionSide} 거래소에 실제 포지션이 없어 DB만 정리`,
-              pos.symbol,
-            );
-            return;
+        if (!isPaperPos) {
+          try {
+            const onExchange = await exchangeService.getPositionAmount(pos.symbol, positionSide);
+            if (onExchange <= 0) {
+              // Position no longer exists on Binance (manually closed, liquidated, or never opened).
+              // Just clean up DB and skip the close order.
+              await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
+              await this.addLog(
+                "warning",
+                `${pos.symbol} ${positionSide} 거래소에 실제 포지션이 없어 DB만 정리`,
+                pos.symbol,
+              );
+              return;
+            }
+            actualQty = onExchange;
+          } catch (err) {
+            logger.warn({ err, symbol: pos.symbol }, "Failed to fetch on-exchange position; falling back to DB qty");
           }
-          actualQty = onExchange;
-        } catch (err) {
-          logger.warn({ err, symbol: pos.symbol }, "Failed to fetch on-exchange position; falling back to DB qty");
-        }
 
-        await exchangeService.placeOrder(
-          pos.symbol,
-          isLong ? "sell" : "buy",
-          "market",
-          actualQty,
-          undefined,
-          { positionSide, reduceOnly: true },
-        );
+          await exchangeService.placeOrder(
+            pos.symbol,
+            isLong ? "sell" : "buy",
+            "market",
+            actualQty,
+            undefined,
+            { positionSide, reduceOnly: true },
+          );
+        }
         const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
         const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
         const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
@@ -919,7 +942,7 @@ class BotManager {
           total: price * pos.quantity,
           fee: price * pos.quantity * 0.001,
           pnl,
-          triggeredBy: "bot",
+          triggeredBy: isPaperPos ? "paper" : "bot",
         });
 
         // Look up the most recent AI signal for this symbol to enrich the reflection
@@ -965,7 +988,7 @@ class BotManager {
 
         await this.addLog(
           exitReason === "TP" ? "trade" : "warning",
-          `${exitReason} 청산: ${pos.symbol} @ $${price.toFixed(2)} | 진입 $${pos.entryPrice.toFixed(2)} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`,
+          `${isPaperPos ? "[가상] " : ""}${exitReason} 청산: ${pos.symbol} @ $${price.toFixed(2)} | 진입 $${pos.entryPrice.toFixed(2)} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`,
           pos.symbol,
           isLong ? "SELL" : "BUY"
         );

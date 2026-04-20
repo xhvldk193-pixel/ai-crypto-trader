@@ -1177,7 +1177,9 @@ components:
         entryMode:
           type: string
           enum: ["fixed", "full"]
-      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides, leverage, marginType, notifyOnError, useTrailingStop, trailingActivatePercent, trailingDistancePercent, usePartialTp, partialTpPercent, entryMode]
+        paperTrading:
+          type: boolean
+      required: [symbol, watchSymbols, timeframe, tradeAmount, maxPositions, stopLossPercent, takeProfitPercent, minConfidence, enabledIndicators, autoTrade, useAiTargets, checkIntervalSeconds, maxDailyLossPercent, useMtfFilter, strictMtf, mtfTimeframes, useFundingRate, symbolOverrides, leverage, marginType, notifyOnError, useTrailingStop, trailingActivatePercent, trailingDistancePercent, usePartialTp, partialTpPercent, entryMode, paperTrading]
 
     BotConfigUpdate:
       type: object
@@ -1246,6 +1248,8 @@ components:
         entryMode:
           type: string
           enum: ["fixed", "full"]
+        paperTrading:
+          type: boolean
 
     SymbolOverride:
       type: object

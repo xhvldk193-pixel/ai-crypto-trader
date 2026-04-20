@@ -406,6 +406,7 @@ export interface BotConfig {
   usePartialTp: boolean;
   partialTpPercent: number;
   entryMode: BotConfigEntryMode;
+  paperTrading: boolean;
 }
 
 export type BotConfigUpdateSymbolOverrides = { [key: string]: SymbolOverride };
@@ -454,6 +455,7 @@ export interface BotConfigUpdate {
   usePartialTp?: boolean;
   partialTpPercent?: number;
   entryMode?: BotConfigUpdateEntryMode;
+  paperTrading?: boolean;
 }
 
 export interface AuthStatus {
