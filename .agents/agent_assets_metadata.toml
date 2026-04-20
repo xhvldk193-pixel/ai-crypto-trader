@@ -18,3 +18,9 @@ id = "ytEU633dgeraufzUcMiLT"
 uri = "file://downloads/project.tar.gz"
 type = "unspecified"
 title = "프로젝트 전체 파일 (Railway 업로드용)"
+
+[[outputs]]
+id = "J9xuPZFcZF8sxTiRR9FTl"
+uri = "file://downloads/project.zip"
+type = "unspecified"
+title = "프로젝트 전체 (Railway 업로드용)"
