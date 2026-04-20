@@ -56,6 +56,7 @@ const botConfigSchema = z.object({
   partialTpPercent: z.coerce.number().min(10).max(90),
   entryMode: z.enum(["fixed", "full"]),
   paperTrading: z.boolean(),
+  checkIntervalSeconds: z.coerce.number().int().min(60),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -121,6 +122,7 @@ export default function BotControl() {
       partialTpPercent: 50,
       entryMode: "fixed",
       paperTrading: true,
+      checkIntervalSeconds: 900,
     },
   });
 
@@ -159,6 +161,7 @@ export default function BotControl() {
         partialTpPercent: config.partialTpPercent ?? 50,
         entryMode: ((config as { entryMode?: string }).entryMode as "fixed" | "full") ?? "fixed",
         paperTrading: (config as { paperTrading?: boolean }).paperTrading ?? true,
+        checkIntervalSeconds: (config as { checkIntervalSeconds?: number }).checkIntervalSeconds ?? 900,
       });
     }
   }, [config, form]);
@@ -475,6 +478,21 @@ export default function BotControl() {
                           <Input type="number" step="0.1" {...field} />
                         </FormControl>
                         <FormDescription>오늘 누적 손실이 이 비율을 넘으면 자동으로 신규 진입을 중단합니다.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="checkIntervalSeconds"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>체크 주기 (초)</FormLabel>
+                        <FormControl>
+                          <Input type="number" min={60} step={60} {...field} />
+                        </FormControl>
+                        <FormDescription>봇이 시장을 분석하는 주기. 15분봉 기준 권장값: 900초 (15분)</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
