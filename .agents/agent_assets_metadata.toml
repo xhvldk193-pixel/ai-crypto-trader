@@ -12,3 +12,9 @@ id = "WCpNgVcxAuq0ZmUqRRoyX"
 uri = "file://exports/ai-trading-code.tar.gz"
 type = "unspecified"
 title = "AI 매매 전체 코드 (ai-trading-code.tar.gz)"
+
+[[outputs]]
+id = "ytEU633dgeraufzUcMiLT"
+uri = "file://downloads/project.tar.gz"
+type = "unspecified"
+title = "프로젝트 전체 (project.tar.gz)"
