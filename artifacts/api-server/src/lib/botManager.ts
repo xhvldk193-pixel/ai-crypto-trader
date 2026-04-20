@@ -413,10 +413,10 @@ class BotManager {
     }
 
     const divergence = analyzeDivergences(candles, symbol, config.timeframe);
-    const hasDivergence = divergence.bullishCount > 0 || divergence.bearishCount > 0;
+    const hasDivergence = divergence.bullishCount >= 2 || divergence.bearishCount >= 2;
 
     if (!hasDivergence) {
-      await this.addLog("info", `${symbol} @ $${ticker.price.toFixed(2)} — 다이버전스 없음 (관망)`, symbol);
+      await this.addLog("info", `${symbol} @ $${ticker.price.toFixed(2)} — 다이버전스 신호 부족 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}, 최소 2개 필요) (관망)`, symbol);
       return;
     }
 
@@ -457,6 +457,15 @@ class BotManager {
 
     this.lastSignal = decision.action;
 
+    if (decision.action === "HOLD") {
+      await this.addLog(
+        "info",
+        `${symbol} @ $${ticker.price.toFixed(2)} — 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount})`,
+        symbol
+      );
+      return;
+    }
+
     await db.insert(aiSignalsTable).values({
       symbol,
       timeframe: config.timeframe,
@@ -473,15 +482,6 @@ class BotManager {
       bullishCount: divergence.bullishCount,
       bearishCount: divergence.bearishCount,
     }).catch((err) => logger.error({ err }, "Failed to persist AI signal"));
-
-    if (decision.action === "HOLD") {
-      await this.addLog(
-        "info",
-        `${symbol} @ $${ticker.price.toFixed(2)} — 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount})`,
-        symbol
-      );
-      return;
-    }
 
     this.totalSignals++;
     const tp = decision.suggestedTakeProfit ?? ticker.price;
