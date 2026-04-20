@@ -594,7 +594,7 @@ class BotManager {
             expectedMovePercent: decision.expectedMovePercent,
             aiConfidence: decision.confidence,
             aiReasoning: decision.reasoning,
-            triggeredBy: "bot",
+            triggeredBy: isPaper ? "paper" : "bot",
           });
           positionInserted = true;
         });
@@ -618,9 +618,9 @@ class BotManager {
 
         let exchangeOrderId: string | undefined;
         if (isPaper) {
-          // Paper trading: skip real exchange order, mark position as "paper"
+          // Paper trading: skip real exchange order; row already inserted as triggeredBy="paper"
           await db.update(activePositionsTable)
-            .set({ quantity, triggeredBy: "paper" })
+            .set({ quantity })
             .where(eq(activePositionsTable.symbol, symbol));
         } else {
           const order = await exchangeService.placeOrder(
