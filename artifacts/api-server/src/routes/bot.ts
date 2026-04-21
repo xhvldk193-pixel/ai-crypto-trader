@@ -246,20 +246,28 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     partialTpPercent: row.partialTpPercent,
   };
 }
-router.patch("/config", async (req, res) => {
+router.all("/config", async (req, res, next) => {
+  // GET 요청은 통과시키고, 수정 요청(PUT, PATCH)만 가로챕니다.
+  if (req.method !== "PUT" && req.method !== "PATCH") {
+    return next();
+  }
+
   try {
     const body = req.body;
+    
+    // 1. DB 업데이트
     await db.update(botConfigTable).set(body);
 
-    // 이게 실행되어야 새로고침해도 ON으로 안 바뀝니다!
+    // 2. ★ 핵심: 드디어 캐시를 비웁니다 ★
     await botManager.reloadConfig(); 
 
+    // 3. 최신 데이터 응답
     const [updated] = await db.select().from(botConfigTable).limit(1);
     res.json(configToResponse(updated));
   } catch (err) {
+    req.log.error({ err }, "Config update failed");
     res.status(500).json({ error: "Update failed" });
   }
 });
-
 
 export default router;
