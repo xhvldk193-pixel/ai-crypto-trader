@@ -105,6 +105,9 @@ class BotManager {
   private dailyPnlPercent = 0;
   private dailyResetDay: number = startOfTodayUtc().getTime();
 
+  // ── [개선] config 캐시: reloadConfig() 또는 start() 시에만 갱신 ──
+  private cachedConfig: BotConfigRow | null = null;
+
   getStatus(): BotStatus {
     return {
       running: this.running,
@@ -157,6 +160,8 @@ class BotManager {
 
   async reloadConfig() {
     if (!this.running) return;
+    // ── [개선] 캐시 무효화 후 강제 재조회 ──
+    this.cachedConfig = null;
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
@@ -179,12 +184,16 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
+  // ── [개선] 캐시 히트 시 DB 조회 생략 ──
   private async getConfig(): Promise<BotConfigRow> {
+    if (this.cachedConfig) return this.cachedConfig;
     const rows = await db.select().from(botConfigTable).limit(1);
     if (rows.length === 0) {
       const [created] = await db.insert(botConfigTable).values({}).returning();
+      this.cachedConfig = created;
       return created;
     }
+    this.cachedConfig = rows[0];
     return rows[0];
   }
 
@@ -221,7 +230,7 @@ class BotManager {
       this.halted = true;
       const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
       await this.addLog("error", msg).catch(() => {});
-      await this.maybeNotify("error", msg, "daily-loss-halt");
+      await this.maybeNotify("error", msg, config, "daily-loss-halt");
     }
   }
 
@@ -264,16 +273,18 @@ class BotManager {
       logger.error({ err }, "Bot tick error");
       const msg = err instanceof Error ? err.message : String(err);
       await this.addLog("error", `봇 틱 오류: ${msg}`).catch(() => {});
-      await this.maybeNotify("error", `봇 틱 오류: ${msg}`, "tick-error");
+      // tick 오류 시 캐시된 config 사용 (없으면 best-effort로 조회)
+      const cfg = this.cachedConfig ?? await this.getConfig().catch(() => null);
+      if (cfg) await this.maybeNotify("error", `봇 틱 오류: ${msg}`, cfg, "tick-error");
     } finally {
       this.tickInFlight = false;
     }
   }
 
-  private async maybeNotify(level: "error" | "warning" | "info", message: string, key?: string) {
+  // ── [개선] config를 인자로 받아 내부 DB 재조회 제거 ──
+  private async maybeNotify(level: "error" | "warning" | "info", message: string, config: BotConfigRow, key?: string) {
     try {
-      const cfg = await this.getConfig();
-      if (cfg.notifyOnError) await notifyAlert(level, message, key);
+      if (config.notifyOnError) await notifyAlert(level, message, key);
     } catch { /* best-effort */ }
   }
 
@@ -618,7 +629,7 @@ class BotManager {
       } catch (err) {
         const errMsg = `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`;
         await this.addLog("error", errMsg, symbol);
-        await this.maybeNotify("error", `❌ ${errMsg}`, `pos-register-fail-${symbol}`);
+        await this.maybeNotify("error", `❌ ${errMsg}`, config, `pos-register-fail-${symbol}`);
         return;
       }
 
@@ -694,7 +705,7 @@ class BotManager {
         await db.delete(activePositionsTable).where(eq(activePositionsTable.symbol, symbol)).catch(() => {});
         const msg = err instanceof Error ? err.message : String(err);
         await this.addLog("error", `거래 실행 실패 (${symbol}): ${msg}`, symbol);
-        await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, `entry-fail-${symbol}`);
+        await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, config, `entry-fail-${symbol}`);
 
         // Record failed entry as a reflection so the AI keeps learning even when no position opens
         try {
@@ -916,12 +927,12 @@ class BotManager {
               pos.quantity = actualQty - closeQty;
               const successMsg = `${isPaperPos ? "[가상] " : ""}부분 익절 ${pos.symbol} ${(partPct * 100).toFixed(0)}% @ $${price.toFixed(4)} | 실현 ${realized >= 0 ? "+" : ""}$${realized.toFixed(2)} | SL → 본전($${pos.entryPrice.toFixed(4)}) | 잔여 TP → $${extendedTp.toFixed(4)}`;
               await this.addLog("trade", successMsg, pos.symbol);
-              await this.maybeNotify("info", `✅ ${successMsg}`, `partial-tp-ok-${pos.symbol}-${pos.id}`);
+              await this.maybeNotify("info", `✅ ${successMsg}`, cfg, `partial-tp-ok-${pos.symbol}-${pos.id}`);
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             await this.addLog("error", `부분 익절 실패 (${pos.symbol}): ${msg}`, pos.symbol);
-            await this.maybeNotify("error", `부분 익절 실패 (${pos.symbol}): ${msg}`, `partial-tp-fail-${pos.symbol}`);
+            await this.maybeNotify("error", `부분 익절 실패 (${pos.symbol}): ${msg}`, cfg, `partial-tp-fail-${pos.symbol}`);
           }
         }
       }
@@ -966,17 +977,21 @@ class BotManager {
             { positionSide, reduceOnly: true },
           );
         }
-        const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
-        const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+
+        // ── [개선] actualQty 사용 (partial TP 이후 잔여분 기준), pnlPct 레버리지 반영 ──
+        const leverage = cfg.leverage ?? 10;
+        const closeQty = actualQty;
+        const pnl = (price - pos.entryPrice) * closeQty * (isLong ? 1 : -1);
+        const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1) * leverage;
         const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
 
         await db.insert(tradeHistoryTable).values({
           symbol: pos.symbol,
           side: isLong ? "sell" : "buy",
           price,
-          quantity: pos.quantity,
-          total: price * pos.quantity,
-          fee: price * pos.quantity * 0.001,
+          quantity: closeQty,
+          total: price * closeQty,
+          fee: price * closeQty * 0.001,
           pnl,
           triggeredBy: isPaperPos ? "paper" : "bot",
         });
@@ -1063,7 +1078,7 @@ class BotManager {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await this.addLog("error", `포지션 청산 실패 (${pos.symbol}): ${msg}`, pos.symbol);
-        await this.maybeNotify("error", `청산 실패 (${pos.symbol}): ${msg}`, `close-fail-${pos.symbol}`);
+        await this.maybeNotify("error", `청산 실패 (${pos.symbol}): ${msg}`, cfg, `close-fail-${pos.symbol}`);
       }
     }));
   }
