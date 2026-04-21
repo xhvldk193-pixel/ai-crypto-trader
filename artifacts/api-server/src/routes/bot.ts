@@ -246,5 +246,23 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     partialTpPercent: row.partialTpPercent,
   };
 }
+router.patch("/config", async (req, res) => {
+  try {
+    const body = req.body;
+    await db.update(botConfigTable).set(body);
+
+    // 이게 실행되어야 새로고침해도 ON으로 안 바뀝니다!
+    await botManager.reloadConfig(); 
+
+    const [updated] = await db.select().from(botConfigTable).limit(1);
+    res.json(configToResponse(updated));
+  } catch (err) {
+    res.status(500).json({ error: "Update failed" });
+  }
+});
+
+// ↑↑↑ 여기까지 넣으시면 됩니다 ↑↑↑
+
+export default router; // (기존 250라인)
 
 export default router;
