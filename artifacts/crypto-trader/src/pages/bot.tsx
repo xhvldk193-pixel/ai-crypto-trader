@@ -160,7 +160,11 @@ export default function BotControl() {
         usePartialTp: config.usePartialTp ?? false,
         partialTpPercent: config.partialTpPercent ?? 50,
         entryMode: ((config as { entryMode?: string }).entryMode as "fixed" | "full") ?? "fixed",
-        paperTrading: (config as { paperTrading?: boolean }).paperTrading ?? true,
+ // paper_trading(서버명)과 paperTrading(UI명) 둘 다 확인하고, 없으면 true
+paperTrading: (config as any).paperTrading !== undefined 
+  ? (config as any).paperTrading 
+  : (config as any).paper_trading ?? true,
+
         checkIntervalSeconds: (config as { checkIntervalSeconds?: number }).checkIntervalSeconds ?? 900,
       });
     }
