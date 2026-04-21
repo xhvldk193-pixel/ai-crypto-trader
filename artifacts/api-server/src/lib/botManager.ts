@@ -247,8 +247,8 @@ private async getConfig(): Promise<BotConfigRow> {
     this.dailyPnlPercent = portfolioBase > 0 ? (this.dailyPnlUsd / portfolioBase) * 100 : 0;
 
     const maxLoss = config.maxDailyLossPercent > 0 ? config.maxDailyLossPercent : 5;
-    if (!(config.paperTrading ?? true) && this.dailyPnlPercent <= -maxLoss && !this.halted) {
-      this.halted = true;
+    if (this.dailyPnlPercent <= -maxLoss && !this.halted) {
+    this.halted = true;
       const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
       await this.addLog("error", msg).catch(() => {});
       await this.maybeNotify("error", msg, config, "daily-loss-halt");
