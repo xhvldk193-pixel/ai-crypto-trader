@@ -103,8 +103,8 @@ router.put("/config", async (req, res) => {
       const v = Number(body.partialTpPercent);
       if (Number.isFinite(v) && v >= 10 && v <= 90) updateData.partialTpPercent = v;
     }
-    // ← paperTrading 추가
     if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
+    if (body.entryMode !== undefined) updateData.entryMode = body.entryMode;
     updateData.updatedAt = new Date();
 
     let updated;
@@ -224,7 +224,8 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     trailingDistancePercent: row.trailingDistancePercent,
     usePartialTp: row.usePartialTp,
     partialTpPercent: row.partialTpPercent,
-    paperTrading: row.paperTrading, // ← 추가
+    paperTrading: row.paperTrading,
+    entryMode: row.entryMode,
   };
 }
 
