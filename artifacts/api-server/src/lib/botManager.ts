@@ -578,7 +578,7 @@ private async getConfig(): Promise<BotConfigRow> {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
-      const isPaper = false;
+      const isPaper = config.paperTrade ?? false;
       if (!isPaper && (config.entryMode ?? "fixed") === "full") {
         try {
           const bal = await exchangeService.getBalance();
