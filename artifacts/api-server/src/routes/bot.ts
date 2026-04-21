@@ -247,27 +247,36 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
   };
 }
 // ... 위쪽 기존 코드들 (configToResponse 함수 등)이 끝난 지점부터 시작
-
 router.all("/config", async (req, res, next) => {
   if (req.method !== "PUT" && req.method !== "PATCH") return next();
 
   try {
     const body = req.body;
-    console.log("=== 설정 변경 요청 발생 ===");
-    
-    // 1. DB 업데이트 시도
-    await db.update(botConfigTable).set(body);
+    console.log("=== UI에서 받은 원본 데이터 ===", body);
 
-    // 2. 캐시 강제 무력화
+    // 핵심: UI가 paperTrading(카멜케이스)으로 보내든 
+    // paper_trading(스네이크케이스)으로 보내든 상관없이 처리합니다.
+    const isPaperTrading = body.paperTrading !== undefined ? body.paperTrading : body.paper_trading;
+
+    // 업데이트할 객체 생성
+    const updateData: any = { ...body };
+    if (isPaperTrading !== undefined) {
+      updateData.paperTrading = isPaperTrading;
+    }
+
+    // 1. DB 업데이트 (조건 없이 첫 번째 행 업데이트)
+    await db.update(botConfigTable).set(updateData);
+
+    // 2. 봇 매니저 설정 즉시 재로드
     await botManager.reloadConfig(); 
 
-    // 3. 최신 데이터 응답
+    // 3. 최신값 다시 읽어서 UI에 응답
     const [updated] = await db.select().from(botConfigTable).limit(1);
-    console.log("DB 최신값 확인:", updated.paperTrading);
+    console.log("=== DB에 저장된 최종 값 ===", updated.paperTrading);
     
     res.json(configToResponse(updated));
   } catch (err) {
-    console.error("업데이트 에러:", err);
+    console.error("업데이트 실패 로그:", err);
     res.status(500).json({ error: "Update failed" });
   }
 });
