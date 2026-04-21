@@ -261,8 +261,5 @@ router.patch("/config", async (req, res) => {
   }
 });
 
-// ↑↑↑ 여기까지 넣으시면 됩니다 ↑↑↑
-
-export default router; // (기존 250라인)
 
 export default router;
