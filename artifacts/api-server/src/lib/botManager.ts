@@ -92,6 +92,12 @@ class BotManager {
   private running = false;
   private startTime: number | null = null;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+
+  // ── [추가] TP/SL 전용 감시 interval ──
+  private positionIntervalId: ReturnType<typeof setInterval> | null = null;
+  private positionCheckInFlight = false;
+  private readonly POSITION_CHECK_INTERVAL_MS = 30 * 1000; // 30초마다 TP/SL 감시
+
   private totalSignals = 0;
   private executedTrades = 0;
   private lastSignal = "HOLD";
@@ -105,7 +111,7 @@ class BotManager {
   private dailyPnlPercent = 0;
   private dailyResetDay: number = startOfTodayUtc().getTime();
 
-  // ── [개선] config 캐시: reloadConfig() 또는 start() 시에만 갱신 ──
+  // ── config 캐시: reloadConfig() 또는 start() 시에만 갱신 ──
   private cachedConfig: BotConfigRow | null = null;
 
   getStatus(): BotStatus {
@@ -142,7 +148,12 @@ class BotManager {
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
+
+    // ── AI 분석 주기 (15분봉 기준 900초)
     this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
+
+    // ── [추가] TP/SL 전용 감시 주기 (30초) — AI 호출 없이 포지션만 체크
+    this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
 
     this.tick().catch((err) => logger.error({ err }, "Bot tick error"));
   }
@@ -155,18 +166,28 @@ class BotManager {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // ── [추가] TP/SL 감시 interval 정리
+    if (this.positionIntervalId) {
+      clearInterval(this.positionIntervalId);
+      this.positionIntervalId = null;
+    }
     this.addLog("info", "트레이딩 봇이 중지되었습니다.").catch(() => {});
   }
 
   async reloadConfig() {
     if (!this.running) return;
-    // ── [개선] 캐시 무효화 후 강제 재조회 ──
+    // 캐시 무효화 후 강제 재조회
     this.cachedConfig = null;
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
     if (this.intervalId) clearInterval(this.intervalId);
     this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
+
+    // ── [추가] TP/SL interval도 재시작
+    if (this.positionIntervalId) clearInterval(this.positionIntervalId);
+    this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
+
     await this.addLog("info", `봇 설정이 재로딩되었습니다: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
   }
 
@@ -184,7 +205,6 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
-  // ── [개선] 캐시 히트 시 DB 조회 생략 ──
   private async getConfig(): Promise<BotConfigRow> {
     if (this.cachedConfig) return this.cachedConfig;
     const rows = await db.select().from(botConfigTable).limit(1);
@@ -215,7 +235,7 @@ class BotManager {
       this.dailyPnlUsd = 0;
     }
 
-    let portfolioBase = config.tradeAmount * 100; // fallback baseline
+    let portfolioBase = config.tradeAmount * 100;
     try {
       const bal = await exchangeService.getBalance();
       if (bal.totalUsd > 0) portfolioBase = bal.totalUsd;
@@ -224,13 +244,29 @@ class BotManager {
     }
     this.dailyPnlPercent = portfolioBase > 0 ? (this.dailyPnlUsd / portfolioBase) * 100 : 0;
 
-    // Guard: maxDailyLossPercent must be positive
     const maxLoss = config.maxDailyLossPercent > 0 ? config.maxDailyLossPercent : 5;
     if (this.dailyPnlPercent <= -maxLoss && !this.halted) {
       this.halted = true;
       const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
       await this.addLog("error", msg).catch(() => {});
       await this.maybeNotify("error", msg, config, "daily-loss-halt");
+    }
+  }
+
+  // ── [추가] TP/SL 전용 tick — AI 분석 없이 포지션 관리만 수행
+  private async positionTick() {
+    if (!this.running) return;
+    if (this.positionCheckInFlight) return; // 중복 실행 방지
+    if (this.tickInFlight) return; // 메인 tick과 충돌 방지
+
+    this.positionCheckInFlight = true;
+    try {
+      const config = await this.getConfig();
+      await this.manageActivePositions(config);
+    } catch (err) {
+      logger.error({ err }, "Position tick error");
+    } finally {
+      this.positionCheckInFlight = false;
     }
   }
 
@@ -245,17 +281,14 @@ class BotManager {
       this.currentTimeframe = config.timeframe;
       this.lastCheckedAt = Date.now();
 
-      // Auto-reconcile every tick (prune phantoms / surface untracked exchange positions)
       this.tickCount += 1;
       try { await this.syncWithExchange("auto"); }
       catch (err) { logger.warn({ err }, "Auto-sync failed"); }
 
-      // Update daily PnL & halt state from realized trades
       await this.refreshDailyPnl(config);
 
-      // Always manage existing positions even if halted (we still want TP/SL exits)
-      await this.manageActivePositions(config);
-
+      // ── tick에서는 manageActivePositions 스킵 (positionTick이 30초마다 처리)
+      // 단, halted 상태 로그는 유지
       if (this.halted) {
         await this.addLog("warning", `🛑 손실 한도 도달 상태 — 신규 진입 건너뜀 (오늘 PnL ${this.dailyPnlPercent.toFixed(2)}%)`);
         return;
@@ -273,7 +306,6 @@ class BotManager {
       logger.error({ err }, "Bot tick error");
       const msg = err instanceof Error ? err.message : String(err);
       await this.addLog("error", `봇 틱 오류: ${msg}`).catch(() => {});
-      // tick 오류 시 캐시된 config 사용 (없으면 best-effort로 조회)
       const cfg = this.cachedConfig ?? await this.getConfig().catch(() => null);
       if (cfg) await this.maybeNotify("error", `봇 틱 오류: ${msg}`, cfg, "tick-error");
     } finally {
@@ -281,20 +313,12 @@ class BotManager {
     }
   }
 
-  // ── [개선] config를 인자로 받아 내부 DB 재조회 제거 ──
   private async maybeNotify(level: "error" | "warning" | "info", message: string, config: BotConfigRow, key?: string) {
     try {
       if (config.notifyOnError) await notifyAlert(level, message, key);
     } catch { /* best-effort */ }
   }
 
-  /**
-   * Reconcile DB-tracked active positions with the exchange.
-   * - mode "auto" (called on bot start + every tick): only PRUNES phantoms (DB rows the exchange no longer holds).
-   *   Exchange-only positions are info-logged but NOT inserted (avoid auto-managing user manual orders).
-   * - mode "adopt" (manual sync button): also INSERTS exchange-only positions into DB so the bot will track them.
-   *   TP/SL are taken from open reduceOnly STOP/TP_MARKET orders when present, else fall back to ±2%/±1% placeholders.
-   */
   async syncWithExchange(mode: "auto" | "adopt" = "adopt"): Promise<{ added: number; removed: number; details: string[] }> {
     const details: string[] = [];
     let added = 0, removed = 0;
@@ -307,7 +331,6 @@ class BotManager {
     }
     const dbPositions = await db.select().from(activePositionsTable);
 
-    // Normalize exchange symbol (BTCUSDT) to slash form (BTC/USDT) using DB hint or heuristic
     const normalize = (s: string): string => {
       if (s.includes("/")) return s;
       if (s.endsWith("USDT")) return `${s.slice(0, -4)}/USDT`;
@@ -316,7 +339,6 @@ class BotManager {
     const exMap = new Map<string, typeof exchangePositions[number]>();
     for (const ex of exchangePositions) exMap.set(`${normalize(ex.symbol)}|${ex.side}`, ex);
 
-    // 1) Remove DB rows that have no on-exchange position (skip paper positions)
     for (const dbPos of dbPositions) {
       if (dbPos.triggeredBy === "paper") continue;
       const k = `${dbPos.symbol}|${dbPos.side}`;
@@ -327,8 +349,6 @@ class BotManager {
       }
     }
 
-    // 2) Handle exchange positions missing in DB
-    // Only include non-paper DB keys to avoid blocking real position adoption
     const dbKeys = new Set(
       dbPositions.filter((p) => p.triggeredBy !== "paper").map((p) => `${p.symbol}|${p.side}`)
     );
@@ -338,7 +358,6 @@ class BotManager {
       if (dbKeys.has(k)) continue;
 
       if (mode === "auto") {
-        // Just log — do NOT auto-track manual user orders
         details.push(`거래소 단독 포지션 감지(미추적): ${sym} ${ex.side} qty=${ex.quantity}`);
         await this.addLog(
           "info",
@@ -348,7 +367,6 @@ class BotManager {
         continue;
       }
 
-      // adopt mode: insert into DB. Try to discover real TP/SL from open reduceOnly orders.
       const dir = ex.side === "long" ? 1 : -1;
       let tp = ex.entryPrice * (1 + dir * 0.02);
       let sl = ex.entryPrice * (1 - dir * 0.01);
@@ -436,7 +454,6 @@ class BotManager {
       return;
     }
 
-    // 신호 강도가 너무 약하면 AI 호출 스킵 (양쪽 다 1개 이하면 노이즈로 판단)
     const strongEnough = divergence.bullishCount >= 2 || divergence.bearishCount >= 2;
     if (!strongEnough) {
       await this.addLog(
@@ -447,7 +464,6 @@ class BotManager {
       return;
     }
 
-    // MTF + funding rate (parallel)
     const mtfTfs = config.useMtfFilter ? ((config.mtfTimeframes as string[]) ?? ["1h", "4h"]) : [];
     const [mtf, fundingRate, openInterest] = await Promise.all([
       mtfTfs.length > 0 ? this.getMtfBias(symbol, mtfTfs) : Promise.resolve({} as Record<string, string>),
@@ -455,7 +471,6 @@ class BotManager {
       config.useFundingRate ? exchangeService.getOpenInterest(symbol) : Promise.resolve(null),
     ]);
 
-    // Strict MTF gate (skip AI call entirely if higher TFs disagree)
     if (config.useMtfFilter && config.strictMtf) {
       const { aligned, conflicts } = this.mtfAligned(divergence.overallBias, mtf);
       if (!aligned) {
@@ -484,7 +499,6 @@ class BotManager {
 
     this.lastSignal = decision.action;
 
-    // HOLD면 DB 저장 스킵하고 바로 리턴 (불필요한 DB write + 토큰 낭비 방지)
     if (decision.action === "HOLD") {
       await this.addLog(
         "info",
@@ -646,7 +660,6 @@ class BotManager {
 
         let exchangeOrderId: string | undefined;
         if (isPaper) {
-          // Paper trading: skip real exchange order; row already inserted as triggeredBy="paper"
           await db.update(activePositionsTable)
             .set({ quantity })
             .where(eq(activePositionsTable.symbol, symbol));
@@ -685,7 +698,6 @@ class BotManager {
           decision.action
         );
 
-        // 진입 알림 (승률 통계 포함)
         this.fetchSignalStats(symbol).then((signalStats) => {
           notifyEntry({
             symbol,
@@ -707,7 +719,6 @@ class BotManager {
         await this.addLog("error", `거래 실행 실패 (${symbol}): ${msg}`, symbol);
         await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, config, `entry-fail-${symbol}`);
 
-        // Record failed entry as a reflection so the AI keeps learning even when no position opens
         try {
           let bullishCount = 0, bearishCount = 0;
           try {
@@ -766,7 +777,6 @@ class BotManager {
     }
   }
 
-  /** Sanitize the AI decision in code (don't trust prompt-only safety) */
   private sanitizeDecision(
     decision: AiDecision,
     currentPrice: number,
@@ -824,12 +834,10 @@ class BotManager {
     };
   }
 
-  /** Check active positions and close ones that hit TP or SL */
   private async manageActivePositions(config?: BotConfigRow) {
     const positions = await db.select().from(activePositionsTable);
     if (positions.length === 0) return;
 
-    // config를 인자로 받아 중복 DB 조회 방지
     const cfg = config ?? await this.getConfig();
 
     await Promise.allSettled(positions.map(async (pos) => {
@@ -843,7 +851,6 @@ class BotManager {
 
       const isLong = pos.side === "long";
 
-      // ─── Trailing stop: update SL when high-water-mark improves ────────
       if (cfg.useTrailingStop) {
         const moveFromEntryPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
         const activate = cfg.trailingActivatePercent ?? 1.0;
@@ -872,8 +879,6 @@ class BotManager {
         }
       }
 
-      // ─── Partial TP: at first TP hit, close configured % and move SL to breakeven ──
-      // (when partial TP is enabled, the full-close TP path below is skipped for the first hit)
       if (cfg.usePartialTp && !pos.partialTpDone) {
         const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
         if (tpHit) {
@@ -911,8 +916,6 @@ class BotManager {
                 pnl: realized,
                 triggeredBy: isPaperPos ? "paper" : "bot",
               });
-              // Move SL to breakeven (entry) and mark partial done
-              // Extend TP to 2x original distance (direction-aware)
               const dir = isLong ? 1 : -1;
               const origTpDistanceAbs = Math.abs(pos.takeProfit - pos.entryPrice);
               const extendedTp = pos.entryPrice + dir * origTpDistanceAbs * 2;
@@ -937,7 +940,6 @@ class BotManager {
         }
       }
 
-      // After partial TP, takeProfit was extended to 2x distance — second hit fully closes remainder
       const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
 
@@ -947,14 +949,11 @@ class BotManager {
       const isPaperPos = pos.triggeredBy === "paper";
       try {
         const positionSide = isLong ? "LONG" : "SHORT";
-        // Always trust the exchange for actual quantity to avoid -2022 ReduceOnly rejections
         let actualQty = pos.quantity;
         if (!isPaperPos) {
           try {
             const onExchange = await exchangeService.getPositionAmount(pos.symbol, positionSide);
             if (onExchange <= 0) {
-              // Position no longer exists on Binance (manually closed, liquidated, or never opened).
-              // Just clean up DB and skip the close order.
               await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
               await this.addLog(
                 "warning",
@@ -978,7 +977,6 @@ class BotManager {
           );
         }
 
-        // ── [개선] actualQty 사용 (partial TP 이후 잔여분 기준), pnlPct 레버리지 반영 ──
         const leverage = cfg.leverage ?? 10;
         const closeQty = actualQty;
         const pnl = (price - pos.entryPrice) * closeQty * (isLong ? 1 : -1);
@@ -996,7 +994,6 @@ class BotManager {
           triggeredBy: isPaperPos ? "paper" : "bot",
         });
 
-        // Look up the most recent AI signal for this symbol to enrich the reflection
         let bullishCount = 0, bearishCount = 0, originalConfidence: number | null = pos.aiConfidence;
         let originalReasoning: string | null = pos.aiReasoning;
         let originalExpectedMovePercent: number | null = pos.expectedMovePercent;
@@ -1044,7 +1041,6 @@ class BotManager {
           isLong ? "SELL" : "BUY"
         );
 
-        // 청산 알림
         notifyExit({
           symbol: pos.symbol,
           side: pos.side,
@@ -1057,7 +1053,6 @@ class BotManager {
           isPaper: isPaperPos,
         }).catch((err) => logger.warn({ err }, "Failed to send exit notification"));
 
-        // Generate AI lesson asynchronously — never block the position close
         if (reflectionRow) {
           this.writeReflectionLesson(reflectionRow.id, {
             symbol: pos.symbol,
@@ -1083,7 +1078,6 @@ class BotManager {
     }));
   }
 
-  // ── 역할별 반성 시스템 프롬프트 ──────────────────────────
   private static readonly ROLE_SYSTEMS: Record<string, string> = {
     analyst: `당신은 암호화폐 트레이딩 봇의 Analyst Reflection Coach 입니다.
 지난 종합 판단과 실제 시장 움직임을 대조해 교훈을 뽑아내는 역할입니다.
@@ -1115,7 +1109,6 @@ class BotManager {
 출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
   };
 
-  /** Async: ask Claude to write a 2-3 sentence Korean post-mortem note */
   private async writeReflectionLesson(reflectionId: number, ctx: {
     symbol: string;
     timeframe: string;
@@ -1177,7 +1170,6 @@ AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100)
       .catch((err) => logger.warn({ err, reflectionId }, "Failed to save reflection lesson"));
   }
 
-  /** Fetch recent reflections for a symbol (7일 이내, 같은 심볼만) */
   private async fetchRecentReflections(symbol: string): Promise<string> {
     try {
       const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1203,11 +1195,6 @@ AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100)
     }
   }
 
-  /**
-   * 신호 조합별 실제 승률 / 평균 손익 통계 (30일).
-   * Claude가 숫자 근거로 confidence를 조정할 수 있도록 주입.
-   * 그룹 키: side × bullishBucket(0~4+) × bearishBucket(0~4+)
-   */
   private async fetchSignalStats(symbol: string): Promise<string> {
     try {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -1315,7 +1302,6 @@ Respond ONLY with valid JSON (no markdown, no prose):
       ? `Open interest: ${openInterest.toLocaleString()} contracts`
       : "Open interest: unavailable";
 
-    // 복기 + 통계 병렬 조회
     const [reflections, signalStats] = await Promise.all([
       this.fetchRecentReflections(symbol),
       this.fetchSignalStats(symbol),
