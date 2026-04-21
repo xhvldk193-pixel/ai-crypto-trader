@@ -20,27 +20,6 @@ router.post("/stop", async (_req, res) => {
   botManager.stop();
   res.json(botManager.getStatus());
 });
-// 기존 23라인과 24라인 사이에 넣으세요.
-router.patch("/config", async (req, res) => {
-  try {
-    const { botConfigTable, db } = await import("@workspace/db");
-    const body = req.body;
-
-    // 1. DB 업데이트
-    await db.update(botConfigTable)
-      .set({
-        paperTrading: body.paperTrading,
-        // 필요하다면 다른 설정 필드들도 여기에 추가
-      });
-
-    // 2. ★ 핵심: 봇 매니저 캐시 갱신 ★
-    await botManager.reloadConfig();
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 router.post("/sync-positions", async (req, res) => {
   try {
@@ -124,6 +103,8 @@ router.put("/config", async (req, res) => {
       const v = Number(body.partialTpPercent);
       if (Number.isFinite(v) && v >= 10 && v <= 90) updateData.partialTpPercent = v;
     }
+    // ← paperTrading 추가
+    if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
     updateData.updatedAt = new Date();
 
     let updated;
@@ -132,10 +113,9 @@ router.put("/config", async (req, res) => {
     } else {
       [updated] = await db.update(botConfigTable).set(updateData).returning();
     }
-    
-    // Restart bot with new config if running
+
     await botManager.reloadConfig();
-    
+
     res.json(configToResponse(updated));
   } catch (err) {
     req.log.error({ err }, "Failed to update bot config");
@@ -244,41 +224,8 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     trailingDistancePercent: row.trailingDistancePercent,
     usePartialTp: row.usePartialTp,
     partialTpPercent: row.partialTpPercent,
+    paperTrading: row.paperTrading, // ← 추가
   };
 }
-// ... 위쪽 기존 코드들 (configToResponse 함수 등)이 끝난 지점부터 시작
-router.all("/config", async (req, res, next) => {
-  if (req.method !== "PUT" && req.method !== "PATCH") return next();
-
-  try {
-    const body = req.body;
-    console.log("=== UI에서 받은 원본 데이터 ===", body);
-
-    // 핵심: UI가 paperTrading(카멜케이스)으로 보내든 
-    // paper_trading(스네이크케이스)으로 보내든 상관없이 처리합니다.
-    const isPaperTrading = body.paperTrading !== undefined ? body.paperTrading : body.paper_trading;
-
-    // 업데이트할 객체 생성
-    const updateData: any = { ...body };
-    if (isPaperTrading !== undefined) {
-      updateData.paperTrading = isPaperTrading;
-    }
-
-    // 1. DB 업데이트 (조건 없이 첫 번째 행 업데이트)
-    await db.update(botConfigTable).set(updateData);
-
-    // 2. 봇 매니저 설정 즉시 재로드
-    await botManager.reloadConfig(); 
-
-    // 3. 최신값 다시 읽어서 UI에 응답
-    const [updated] = await db.select().from(botConfigTable).limit(1);
-    console.log("=== DB에 저장된 최종 값 ===", updated.paperTrading);
-    
-    res.json(configToResponse(updated));
-  } catch (err) {
-    console.error("업데이트 실패 로그:", err);
-    res.status(500).json({ error: "Update failed" });
-  }
-});
 
 export default router;
