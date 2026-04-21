@@ -6,7 +6,7 @@ import { analyzeDivergences } from "./divergence";
 import { computeAtrPercent } from "./indicators";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
-import { notifyAlert } from "./telegram";
+import { notifyAlert, notifyEntry, notifyExit } from "./telegram";
 
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
 
@@ -673,6 +673,23 @@ class BotManager {
           symbol,
           decision.action
         );
+
+        // 진입 알림 (승률 통계 포함)
+        this.fetchSignalStats(symbol).then((signalStats) => {
+          notifyEntry({
+            symbol,
+            action: decision.action,
+            entryPrice,
+            takeProfit,
+            stopLoss,
+            confidence: decision.confidence,
+            expectedMovePercent: decision.expectedMovePercent,
+            bullishCount: divergence.bullishCount,
+            bearishCount: divergence.bearishCount,
+            signalStats,
+            isPaper,
+          });
+        }).catch((err) => logger.warn({ err }, "Failed to send entry notification"));
       } catch (err) {
         await db.delete(activePositionsTable).where(eq(activePositionsTable.symbol, symbol)).catch(() => {});
         const msg = err instanceof Error ? err.message : String(err);
@@ -1011,6 +1028,19 @@ class BotManager {
           pos.symbol,
           isLong ? "SELL" : "BUY"
         );
+
+        // 청산 알림
+        notifyExit({
+          symbol: pos.symbol,
+          side: pos.side,
+          exitReason,
+          entryPrice: pos.entryPrice,
+          exitPrice: price,
+          pnl,
+          pnlPercent: pnlPct,
+          holdMinutes: Math.floor(holdSeconds / 60),
+          isPaper: isPaperPos,
+        }).catch((err) => logger.warn({ err }, "Failed to send exit notification"));
 
         // Generate AI lesson asynchronously — never block the position close
         if (reflectionRow) {
