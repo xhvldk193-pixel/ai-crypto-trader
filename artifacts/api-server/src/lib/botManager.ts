@@ -175,8 +175,6 @@ class BotManager {
   }
 
   async reloadConfig() {
-    if (!this.running) return;
-    // 캐시 무효화 후 강제 재조회
     this.cachedConfig = null;
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
