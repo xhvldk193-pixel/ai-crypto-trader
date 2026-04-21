@@ -1,6 +1,6 @@
 import { db } from "@workspace/db";
 import { botConfigTable, botLogsTable, tradeHistoryTable, activePositionsTable, aiSignalsTable, tradeReflectionsTable } from "@workspace/db";
-import { eq, gte, sql, desc } from "drizzle-orm";
+import { eq, gte, sql, desc, and } from "drizzle-orm";
 import { exchangeService } from "./exchange";
 import { analyzeDivergences } from "./divergence";
 import { computeAtrPercent } from "./indicators";
@@ -215,7 +215,9 @@ class BotManager {
     }
     this.dailyPnlPercent = portfolioBase > 0 ? (this.dailyPnlUsd / portfolioBase) * 100 : 0;
 
-    if (this.dailyPnlPercent <= -config.maxDailyLossPercent && !this.halted) {
+    // Guard: maxDailyLossPercent must be positive
+    const maxLoss = config.maxDailyLossPercent > 0 ? config.maxDailyLossPercent : 5;
+    if (this.dailyPnlPercent <= -maxLoss && !this.halted) {
       this.halted = true;
       const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
       await this.addLog("error", msg).catch(() => {});
@@ -243,7 +245,7 @@ class BotManager {
       await this.refreshDailyPnl(config);
 
       // Always manage existing positions even if halted (we still want TP/SL exits)
-      await this.manageActivePositions();
+      await this.manageActivePositions(config);
 
       if (this.halted) {
         await this.addLog("warning", `🛑 손실 한도 도달 상태 — 신규 진입 건너뜀 (오늘 PnL ${this.dailyPnlPercent.toFixed(2)}%)`);
@@ -315,7 +317,10 @@ class BotManager {
     }
 
     // 2) Handle exchange positions missing in DB
-    const dbKeys = new Set(dbPositions.map((p) => `${p.symbol}|${p.side}`));
+    // Only include non-paper DB keys to avoid blocking real position adoption
+    const dbKeys = new Set(
+      dbPositions.filter((p) => p.triggeredBy !== "paper").map((p) => `${p.symbol}|${p.side}`)
+    );
     for (const ex of exchangePositions) {
       const sym = normalize(ex.symbol);
       const k = `${sym}|${ex.side}`;
@@ -792,11 +797,12 @@ class BotManager {
   }
 
   /** Check active positions and close ones that hit TP or SL */
-  private async manageActivePositions() {
+  private async manageActivePositions(config?: BotConfigRow) {
     const positions = await db.select().from(activePositionsTable);
     if (positions.length === 0) return;
 
-    const config = await this.getConfig();
+    // config를 인자로 받아 중복 DB 조회 방지
+    const cfg = config ?? await this.getConfig();
 
     await Promise.allSettled(positions.map(async (pos) => {
       let price: number;
@@ -810,10 +816,10 @@ class BotManager {
       const isLong = pos.side === "long";
 
       // ─── Trailing stop: update SL when high-water-mark improves ────────
-      if (config.useTrailingStop) {
+      if (cfg.useTrailingStop) {
         const moveFromEntryPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
-        const activate = config.trailingActivatePercent ?? 1.0;
-        const distance = config.trailingDistancePercent ?? 0.5;
+        const activate = cfg.trailingActivatePercent ?? 1.0;
+        const distance = cfg.trailingDistancePercent ?? 0.5;
         if (moveFromEntryPct >= activate) {
           const hwm = pos.highWaterMark ?? pos.entryPrice;
           const newHwm = isLong ? Math.max(hwm, price) : Math.min(hwm, price);
@@ -840,7 +846,7 @@ class BotManager {
 
       // ─── Partial TP: at first TP hit, close configured % and move SL to breakeven ──
       // (when partial TP is enabled, the full-close TP path below is skipped for the first hit)
-      if (config.usePartialTp && !pos.partialTpDone) {
+      if (cfg.usePartialTp && !pos.partialTpDone) {
         const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
         if (tpHit) {
           try {
@@ -853,7 +859,7 @@ class BotManager {
                 if (onEx > 0) actualQty = onEx;
               } catch { /* fall back to DB */ }
             }
-            const partPct = (config.partialTpPercent ?? 50) / 100;
+            const partPct = (cfg.partialTpPercent ?? 50) / 100;
             const closeQty = actualQty * partPct;
             if (closeQty > 0) {
               if (!isPaperPos) {
@@ -878,9 +884,10 @@ class BotManager {
                 triggeredBy: isPaperPos ? "paper" : "bot",
               });
               // Move SL to breakeven (entry) and mark partial done
-              // Extend TP to 2x original distance so the remainder can be fully closed at a second TP
-              const origTpDistance = pos.takeProfit - pos.entryPrice;
-              const extendedTp = pos.entryPrice + origTpDistance * 2;
+              // Extend TP to 2x original distance (direction-aware)
+              const dir = isLong ? 1 : -1;
+              const origTpDistanceAbs = Math.abs(pos.takeProfit - pos.entryPrice);
+              const extendedTp = pos.entryPrice + dir * origTpDistanceAbs * 2;
               await db.update(activePositionsTable).set({
                 quantity: actualQty - closeQty,
                 stopLoss: pos.entryPrice,
@@ -1031,7 +1038,6 @@ class BotManager {
     }));
   }
 
-  /** Async: ask Claude to write a 2-3 sentence Korean post-mortem note */
   // ── 역할별 반성 시스템 프롬프트 ──────────────────────────
   private static readonly ROLE_SYSTEMS: Record<string, string> = {
     analyst: `당신은 암호화폐 트레이딩 봇의 Analyst Reflection Coach 입니다.
@@ -1064,6 +1070,7 @@ class BotManager {
 출력: 마크다운 금지. 순수 한국어. 200자 이내. 마지막 줄은 반드시 "다음 체크리스트:" 로 시작.`,
   };
 
+  /** Async: ask Claude to write a 2-3 sentence Korean post-mortem note */
   private async writeReflectionLesson(reflectionId: number, ctx: {
     symbol: string;
     timeframe: string;
@@ -1124,34 +1131,90 @@ AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100)
       .where(eq(tradeReflectionsTable.id, reflectionId))
       .catch((err) => logger.warn({ err, reflectionId }, "Failed to save reflection lesson"));
   }
-  /** Fetch recent reflections for a symbol (and a few global) for AI context */
+
+  /** Fetch recent reflections for a symbol (7일 이내, 같은 심볼만) */
   private async fetchRecentReflections(symbol: string): Promise<string> {
     try {
-      const symbolRows = await db.select().from(tradeReflectionsTable)
-        .where(eq(tradeReflectionsTable.symbol, symbol))
+      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const rows = await db.select().from(tradeReflectionsTable)
+        .where(and(
+          eq(tradeReflectionsTable.symbol, symbol),
+          gte(tradeReflectionsTable.createdAt, since),
+        ))
         .orderBy(desc(tradeReflectionsTable.createdAt))
-        .limit(8);
-      let rows = symbolRows;
-      if (rows.length < 4) {
-        const globalRows = await db.select().from(tradeReflectionsTable)
-          .orderBy(desc(tradeReflectionsTable.createdAt))
-          .limit(8);
-        const seen = new Set(rows.map((r) => r.id));
-        for (const g of globalRows) {
-          if (rows.length >= 8) break;
-          if (!seen.has(g.id)) rows.push(g);
-        }
-      }
+        .limit(6);
+
       if (rows.length === 0) return "  (아직 복기 데이터 없음)";
+
       return rows.map((r) => {
         const verdict = r.exitReason === "TP" ? "✓익절" : r.exitReason === "SL" ? "✗손절" : r.exitReason === "ENTRY_FAILED" ? "⚠진입실패" : r.exitReason;
         const pnlPart = `${r.pnlPercent >= 0 ? "+" : ""}${r.pnlPercent.toFixed(2)}%`;
         const lesson = r.lessonText ? r.lessonText.replace(/\s+/g, " ").trim() : "(복기 노트 생성 중)";
-        return `  - [${verdict} ${pnlPart}] ${r.symbol} ${r.side.toUpperCase()} 강세${r.bullishCount}/약세${r.bearishCount}: ${lesson}`;
+        return `  - [${verdict} ${pnlPart}] ${r.side.toUpperCase()} 강세${r.bullishCount}/약세${r.bearishCount}: ${lesson}`;
       }).join("\n");
     } catch (err) {
       logger.warn({ err }, "Failed to fetch reflections");
       return "  (복기 데이터 조회 실패)";
+    }
+  }
+
+  /**
+   * 신호 조합별 실제 승률 / 평균 손익 통계 (30일).
+   * Claude가 숫자 근거로 confidence를 조정할 수 있도록 주입.
+   * 그룹 키: side × bullishBucket(0~4+) × bearishBucket(0~4+)
+   */
+  private async fetchSignalStats(symbol: string): Promise<string> {
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const rows = await db.select({
+        side: tradeReflectionsTable.side,
+        bullishCount: tradeReflectionsTable.bullishCount,
+        bearishCount: tradeReflectionsTable.bearishCount,
+        exitReason: tradeReflectionsTable.exitReason,
+        pnlPercent: tradeReflectionsTable.pnlPercent,
+      })
+        .from(tradeReflectionsTable)
+        .where(and(
+          eq(tradeReflectionsTable.symbol, symbol),
+          gte(tradeReflectionsTable.createdAt, since),
+        ));
+
+      if (rows.length < 5) return "  (통계 데이터 부족 — 5건 미만)";
+
+      const bucket = (n: number) => Math.min(n, 4);
+      type StatCell = { wins: number; total: number; pnlSum: number };
+      const map = new Map<string, StatCell>();
+
+      for (const r of rows) {
+        if (r.exitReason === "ENTRY_FAILED") continue;
+        const key = `${r.side}|b${bucket(r.bullishCount)}|s${bucket(r.bearishCount)}`;
+        const cell = map.get(key) ?? { wins: 0, total: 0, pnlSum: 0 };
+        cell.total++;
+        if (r.exitReason === "TP") cell.wins++;
+        cell.pnlSum += r.pnlPercent;
+        map.set(key, cell);
+      }
+
+      if (map.size === 0) return "  (유효한 통계 없음)";
+
+      const lines = [...map.entries()]
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, 10)
+        .map(([key, { wins, total, pnlSum }]) => {
+          const [side, bPart, sPart] = key.split("|");
+          const bull = bPart.replace("b", "");
+          const bear = sPart.replace("s", "");
+          const winRate = ((wins / total) * 100).toFixed(0);
+          const avgPnl = (pnlSum / total).toFixed(2);
+          const bullLabel = bull === "4" ? "4+" : bull;
+          const bearLabel = bear === "4" ? "4+" : bear;
+          return `  - ${side.toUpperCase()} 강세${bullLabel}/약세${bearLabel}: 승률 ${winRate}% (${wins}/${total}건) 평균손익 ${Number(avgPnl) >= 0 ? "+" : ""}${avgPnl}%`;
+        });
+
+      return lines.join("\n");
+    } catch (err) {
+      logger.warn({ err }, "Failed to fetch signal stats");
+      return "  (통계 조회 실패)";
     }
   }
 
@@ -1180,6 +1243,7 @@ Rules:
 - If higher MTFs strongly disagree with the primary bias, prefer HOLD or reduce confidence.
 - Funding rate: very positive = crowded longs (mild bearish bias); very negative = crowded shorts (mild bullish bias).
 - Set HOLD if signals are weak/conflicting.
+- Signal stats are based on real past trades for this symbol. If win rate < 50% for the current signal combination, lower confidence or prefer HOLD.
 
 Reasoning must be in Korean (2–3 sentences) and explain (1) the dominant divergence direction & strength, (2) MTF + funding context, (3) the predicted move and chosen TP/SL.
 
@@ -1206,7 +1270,11 @@ Respond ONLY with valid JSON (no markdown, no prose):
       ? `Open interest: ${openInterest.toLocaleString()} contracts`
       : "Open interest: unavailable";
 
-    const reflections = await this.fetchRecentReflections(symbol);
+    // 복기 + 통계 병렬 조회
+    const [reflections, signalStats] = await Promise.all([
+      this.fetchRecentReflections(symbol),
+      this.fetchSignalStats(symbol),
+    ]);
 
     const userMessage = `Symbol: ${symbol}
 Timeframe: ${timeframe}
@@ -1226,14 +1294,19 @@ Futures context:
 ${frText}
 ${oiText}
 
-최근 거래 복기 (지난 결과로부터 학습할 것 — 비슷한 조건이면 패턴을 따르고, 반복된 손절 조합은 회피하세요):
+신호 조합별 실적 통계 (30일, 이 심볼 한정 — 숫자 근거로 삼을 것):
+${signalStats}
+
+최근 거래 복기 (7일, 구체적 교훈 — 비슷한 조건이면 패턴을 따르고 반복 손절 조합은 회피):
 ${reflections}
 
-Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL. 위 복기 노트의 교훈을 반드시 reasoning에 1번 이상 반영하세요.`;
+Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.
+승률이 낮은 신호 조합(<50%)이면 confidence를 낮추거나 HOLD를 우선하세요.
+위 복기 노트의 교훈을 반드시 reasoning에 1번 이상 반영하세요.`;
 
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 8192,
+      max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
@@ -1242,7 +1315,14 @@ Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.
     const content = block && block.type === "text" ? block.text : "";
     if (!content) throw new Error("Empty AI response");
 
-    const parsed = JSON.parse(extractJson(content));
+    let parsed: ReturnType<typeof JSON.parse>;
+    try {
+      parsed = JSON.parse(extractJson(content));
+    } catch {
+      logger.warn({ content }, "Failed to parse AI JSON response");
+      throw new Error("AI response JSON parse failed");
+    }
+
     const action = (parsed.action as string) === "BUY" || parsed.action === "SELL" ? parsed.action : "HOLD";
     const confidence = Math.min(1, Math.max(0, Number(parsed.confidence) || 0.5));
     const entryPrice = Number(parsed.suggestedEntryPrice) || currentPrice;
