@@ -3,8 +3,8 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "pnpm --filter @workspace/api-server run start"
+startCommand = "pnpm --filter @workspace/db run push && pnpm --filter @workspace/api-server run start"
 healthcheckPath = "/api/healthz"
-healthcheckTimeout = 30
+healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
