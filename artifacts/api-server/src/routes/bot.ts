@@ -246,26 +246,30 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     partialTpPercent: row.partialTpPercent,
   };
 }
-router.all("/config", async (req, res, next) => {
-  // GET 요청은 통과시키고, 수정 요청(PUT, PATCH)만 가로챕니다.
-  if (req.method !== "PUT" && req.method !== "PATCH") {
-    return next();
   }
+router.all("/config", async (req, res, next) => {
+  if (req.method !== "PUT" && req.method !== "PATCH") return next();
 
   try {
     const body = req.body;
-    
-    // 1. DB 업데이트
-    await db.update(botConfigTable).set(body);
+    // 터미널(Railway Logs)에 어떤 데이터가 들어오는지 찍어봅니다.
+    console.log("=== 설정 변경 요청 발생 ===");
+    console.log("받은 데이터:", JSON.stringify(body, null, 2));
 
-    // 2. ★ 핵심: 드디어 캐시를 비웁니다 ★
+    // 1. DB 업데이트 시도
+    const result = await db.update(botConfigTable).set(body);
+    console.log("DB 업데이트 결과:", result);
+
+    // 2. 캐시 강제 무력화
     await botManager.reloadConfig(); 
 
     // 3. 최신 데이터 응답
     const [updated] = await db.select().from(botConfigTable).limit(1);
+    console.log("DB에서 다시 읽어온 값(paperTrading):", updated.paperTrading);
+    
     res.json(configToResponse(updated));
   } catch (err) {
-    req.log.error({ err }, "Config update failed");
+    console.error("업데이트 에러:", err);
     res.status(500).json({ error: "Update failed" });
   }
 });
