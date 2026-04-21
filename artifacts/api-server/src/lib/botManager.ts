@@ -203,17 +203,21 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
-  private async getConfig(): Promise<BotConfigRow> {
-    if (this.cachedConfig) return this.cachedConfig;
-    const rows = await db.select().from(botConfigTable).limit(1);
-    if (rows.length === 0) {
-      const [created] = await db.insert(botConfigTable).values({}).returning();
-      this.cachedConfig = created;
-      return created;
-    }
-    this.cachedConfig = rows[0];
-    return rows[0];
+// 206라인부터 시작하는 getConfig 함수를 이렇게 수정하세요.
+private async getConfig(): Promise<BotConfigRow> {
+  // 캐시가 있더라도 무조건 무시하고 DB에서 새로 가져오게 만듭니다.
+  const rows = await db.select().from(botConfigTable).limit(1);
+  
+  if (rows.length === 0) {
+    const [created] = await db.insert(botConfigTable).values({}).returning();
+    this.cachedConfig = created;
+    return created;
   }
+
+  // 매번 DB의 최신값을 캐시에 저장하고 반환합니다.
+  this.cachedConfig = rows[0];
+  return rows[0];
+}
 
   private async refreshDailyPnl(config: BotConfigRow): Promise<void> {
     const today = startOfTodayUtc().getTime();
