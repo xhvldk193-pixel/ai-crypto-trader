@@ -20,6 +20,27 @@ router.post("/stop", async (_req, res) => {
   botManager.stop();
   res.json(botManager.getStatus());
 });
+// 기존 23라인과 24라인 사이에 넣으세요.
+router.patch("/config", async (req, res) => {
+  try {
+    const { botConfigTable, db } = await import("@workspace/db");
+    const body = req.body;
+
+    // 1. DB 업데이트
+    await db.update(botConfigTable)
+      .set({
+        paperTrading: body.paperTrading,
+        // 필요하다면 다른 설정 필드들도 여기에 추가
+      });
+
+    // 2. ★ 핵심: 봇 매니저 캐시 갱신 ★
+    await botManager.reloadConfig();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post("/sync-positions", async (req, res) => {
   try {
