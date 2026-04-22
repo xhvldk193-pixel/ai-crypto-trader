@@ -159,7 +159,7 @@ useEffect(() => {
       trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
       usePartialTp: config.usePartialTp ?? false,
       partialTpPercent: config.partialTpPercent ?? 50,
-      entryMode: (config.entryMode as "fixed" | "full") ?? "fixed",
+    entryMode: ((config as any).entryMode as "fixed" | "full") ?? "fixed",
       paperTrading: config.paperTrading ?? false,
       checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
     });
