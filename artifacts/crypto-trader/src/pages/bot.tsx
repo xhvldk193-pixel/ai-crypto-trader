@@ -159,7 +159,7 @@ export default function BotControl() {
         trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
         usePartialTp: config.usePartialTp ?? false,
         partialTpPercent: config.partialTpPercent ?? 50,
-        entryMode: ((config as { entryMode?: string }).entryMode as "fixed" | "full") ?? "fixed",
+        entryMode: (config.entryMode as "fixed" | "full") ?? "fixed",
  // paper_trading(서버명)과 paperTrading(UI명) 둘 다 확인하고, 없으면 true
 paperTrading: config.paperTrading ?? false,
         checkIntervalSeconds: (config as { checkIntervalSeconds?: number }).checkIntervalSeconds ?? 900,
