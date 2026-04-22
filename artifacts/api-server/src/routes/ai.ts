@@ -5,6 +5,7 @@ import { desc } from "drizzle-orm";
 import { exchangeService } from "../lib/exchange";
 import { computeAtrPercent } from "../lib/indicators";
 import { analyzeDivergences } from "../lib/divergence";
+import { getMacroContext, formatMacroForPrompt } from "../lib/macro";
 
 const router = Router();
 
@@ -49,16 +50,17 @@ router.post("/signal", async (req, res) => {
       req.log.warn({ err }, "Failed to compute ATR for AI signal");
     }
 
-    // MTF + funding rate context (best-effort)
     const cfgRows = await db.select().from(botConfigTable).limit(1);
     const cfg = cfgRows[0];
     const mtfTfs = cfg?.useMtfFilter
       ? ((cfg.mtfTimeframes as string[]) ?? ["1h", "4h"])
       : [];
-    const [mtf, fundingRate, openInterest] = await Promise.all([
+
+    const [mtf, fundingRate, openInterest, macroData] = await Promise.all([
       mtfTfs.length > 0 ? getMtfBias(symbol, mtfTfs) : Promise.resolve({} as Record<string, string>),
       cfg?.useFundingRate !== false ? exchangeService.getFundingRate(symbol) : Promise.resolve(null),
       cfg?.useFundingRate !== false ? exchangeService.getOpenInterest(symbol) : Promise.resolve(null),
+      getMacroContext(),
     ]);
 
     const signals = (divergenceData?.signals ?? []) as Array<{
@@ -89,18 +91,19 @@ Your job:
 1. Decide BUY / SELL / HOLD based on overall divergence bias and strength.
 2. Respect the multi-timeframe (MTF) bias on higher timeframes — if higher TFs strongly disagree with the primary signal, prefer HOLD or reduce confidence.
 3. Use funding rate as a contrarian sentiment cue (very positive funding → crowded longs, slight bearish bias; very negative → crowded shorts, slight bullish bias).
-4. Predict an expected price-move magnitude over the next ~10–20 candles. Use divergence strength + recent ATR as a sanity bound. Typical 15m moves: 0.3%–2.5%; strong setups 3–5%.
-5. From the predicted move, set:
+4. Factor in macro environment — high real rates or strong DXY are headwinds for BTC; extreme fear can be a contrarian buy signal; low stablecoin liquidity limits upside.
+5. Predict an expected price-move magnitude over the next ~10–20 candles. Use divergence strength + recent ATR as a sanity bound. Typical 15m moves: 0.3%–2.5%; strong setups 3–5%.
+6. From the predicted move, set:
    - suggestedEntryPrice: usually the current price
    - suggestedTakeProfit: entry ± expected move (BUY: +, SELL: -)
    - suggestedStopLoss: opposite side, sized smaller than TP to keep R/R ≥ 1.3 (typically 0.4–0.7× of expected move)
-6. expectedMovePercent must be SIGNED: positive for BUY, negative for SELL, 0 for HOLD.
+7. expectedMovePercent must be SIGNED: positive for BUY, negative for SELL, 0 for HOLD.
 
 Respond ONLY with valid JSON (no prose, no markdown fences) matching this exact schema:
 {
   "action": "BUY" | "SELL" | "HOLD",
   "confidence": number (0.0-1.0),
-  "reasoning": string (Korean, 2-3 sentences explaining the signal, MTF/funding context, predicted move, and chosen TP/SL),
+  "reasoning": string (Korean, 2-3 sentences explaining the signal, MTF/funding context, macro environment, predicted move, and chosen TP/SL),
   "riskLevel": "low" | "medium" | "high",
   "expectedMovePercent": number,
   "suggestedEntryPrice": number,
@@ -125,6 +128,9 @@ ${mtfText}
 Futures context:
 ${fundingText}
 ${oiText}
+
+Macro Environment:
+${formatMacroForPrompt(macroData)}
 
 Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 
