@@ -4,7 +4,7 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 RUN pnpm --filter @workspace/db run build 2>/dev/null || true
 RUN pnpm --filter @workspace/api-zod run build 2>/dev/null || true
 RUN pnpm --filter @workspace/integrations-anthropic-ai run build 2>/dev/null || true
