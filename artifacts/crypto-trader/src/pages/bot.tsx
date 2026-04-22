@@ -162,7 +162,7 @@ export default function BotControl() {
         entryMode: (config.entryMode as "fixed" | "full") ?? "fixed",
  // paper_trading(서버명)과 paperTrading(UI명) 둘 다 확인하고, 없으면 true
 paperTrading: config.paperTrading ?? false,
-        checkIntervalSeconds: (config as { checkIntervalSeconds?: number }).checkIntervalSeconds ?? 900,
+        checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
       });
     }
   }, [config, form]);
