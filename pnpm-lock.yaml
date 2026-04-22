@@ -178,6 +178,9 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
+      ccxt:
+        specifier: ^4.3.0
+        version: 4.5.50
       connect-pg-simple:
         specifier: ^10.0.0
         version: 10.0.0
@@ -680,7 +683,7 @@ importers:
     dependencies:
       openai:
         specifier: ^6.27.0
-        version: 6.34.0(zod@4.3.6)
+        version: 6.34.0(ws@8.20.0)(zod@4.3.6)
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
@@ -1865,6 +1868,10 @@ packages:
 
   caniuse-lite@1.0.30001777:
     resolution: {integrity: sha512-tmN+fJxroPndC74efCdp12j+0rk0RHwV5Jwa1zWaFVyw2ZxAuPeG8ZgWC3Wz7uSjT3qMRQ5XHZ4COgQmsCMJAQ==}
+
+  ccxt@4.5.50:
+    resolution: {integrity: sha512-7xI1QeVtW+jgikRrzGJd4qhc7X0heWrH2Z+gWOJuj9N5fqn0ub7p0ZeUj3KWOPF/MO/hRFdNZX91xuEt4Alxjg==}
+    engines: {node: '>=15.0.0'}
 
   chokidar@4.0.3:
     resolution: {integrity: sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA==}
@@ -3296,6 +3303,18 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  ws@8.20.0:
+    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -4660,6 +4679,13 @@ snapshots:
 
   caniuse-lite@1.0.30001777: {}
 
+  ccxt@4.5.50:
+    dependencies:
+      ws: 8.20.0
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
   chokidar@4.0.3:
     dependencies:
       readdirp: 4.1.2
@@ -5296,8 +5322,9 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@6.34.0(zod@4.3.6):
+  openai@6.34.0(ws@8.20.0)(zod@4.3.6):
     optionalDependencies:
+      ws: 8.20.0
       zod: 4.3.6
 
   orval@8.5.3(prettier@3.8.1)(typescript@5.9.3):
@@ -5922,6 +5949,8 @@ snapshots:
       use-sync-external-store: 1.6.0(react@19.1.0)
 
   wrappy@1.0.2: {}
+
+  ws@8.20.0: {}
 
   xtend@4.0.2: {}
 
