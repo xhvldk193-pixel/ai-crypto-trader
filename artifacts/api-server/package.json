@@ -14,6 +14,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/integrations-anthropic-ai": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
+    "ccxt": "^4.3.0",
     "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
