@@ -358,7 +358,7 @@ useEffect(() => {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>진입 모드</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value ?? "fixed"}>
                           <FormControl>
                             <SelectTrigger>
                               <SelectValue placeholder="진입 모드 선택" />
