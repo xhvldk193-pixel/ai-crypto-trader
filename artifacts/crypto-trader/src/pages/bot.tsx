@@ -69,7 +69,9 @@ export default function BotControl() {
   const symbols = symbolsData?.symbols || ["BTC/USDT"];
 
   const { data: status, refetch: refetchStatus } = useGetBotStatus({ query: { refetchInterval: 5000 } as never });
-  const { data: config, isLoading: isConfigLoading } = useGetBotConfig();
+  const { data: config, isLoading: isConfigLoading } = useGetBotConfig({
+  query: { staleTime: 0, cacheTime: 0 } as never
+});
   const { data: logsData } = useGetBotLogs({ limit: 20 }, { query: { refetchInterval: 5000 } as never });
   const { data: reflectionsData } = useGetBotReflections({ limit: 12 }, { query: { refetchInterval: 15000 } as never });
 
