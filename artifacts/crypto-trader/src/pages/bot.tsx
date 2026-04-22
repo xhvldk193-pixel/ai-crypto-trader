@@ -353,26 +353,33 @@ useEffect(() => {
                   />
 
                   <FormField
-                    control={form.control}
-                    name="entryMode"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>진입 모드</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value ?? "fixed"}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="진입 모드 선택" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="fixed">고정 시드 — 아래 거래 금액 사용</SelectItem>
-                            <SelectItem value="full">풀 진입 — 매 진입마다 가용 잔고 99% 전부 투입</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+  control={form.control}
+  name="entryMode"
+  render={({ field }) => (
+    <FormItem>
+      <FormLabel>진입 모드</FormLabel>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant={field.value === "fixed" ? "default" : "outline"}
+          onClick={() => field.onChange("fixed")}
+          className="flex-1"
+        >
+          고정 시드
+        </Button>
+        <Button
+          type="button"
+          variant={field.value === "full" ? "default" : "outline"}
+          onClick={() => field.onChange("full")}
+          className="flex-1"
+        >
+          풀 진입
+        </Button>
+      </div>
+      <FormMessage />
+    </FormItem>
+  )}
+/>
 
                   <div className="grid grid-cols-2 gap-4">
                     <FormField
