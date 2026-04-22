@@ -502,13 +502,13 @@ private async getConfig(): Promise<BotConfigRow> {
     this.lastSignal = decision.action;
 
     if (decision.action === "HOLD") {
-      await this.addLog(
-        "info",
-        `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount})`,
-        symbol
-      );
-      return;
-    }
+  await this.addLog(
+    "info",
+    `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}) | ${decision.reasoning}`,
+    symbol
+  );
+  return;
+}
 
     await db.insert(aiSignalsTable).values({
       symbol,
