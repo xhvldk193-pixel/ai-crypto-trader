@@ -131,41 +131,40 @@ export default function BotControl() {
   const usePartialValue = form.watch("usePartialTp");
   const entryModeValue = form.watch("entryMode");
 
-  useEffect(() => {
-    if (config) {
-      const ws = config.watchSymbols && config.watchSymbols.length > 0 ? config.watchSymbols : [config.symbol];
-      form.reset({
-        symbol: config.symbol,
-        watchSymbols: ws,
-        timeframe: config.timeframe,
-        tradeAmount: config.tradeAmount,
-        maxPositions: config.maxPositions,
-        stopLossPercent: config.stopLossPercent,
-        takeProfitPercent: config.takeProfitPercent,
-        minConfidence: config.minConfidence,
-        autoTrade: config.autoTrade,
-        useAiTargets: config.useAiTargets ?? true,
-        maxDailyLossPercent: config.maxDailyLossPercent ?? 3,
-        useMtfFilter: config.useMtfFilter ?? true,
-        strictMtf: config.strictMtf ?? true,
-        mtfTimeframes: config.mtfTimeframes && config.mtfTimeframes.length > 0 ? config.mtfTimeframes : ["1h", "4h"],
-        useFundingRate: config.useFundingRate ?? true,
-        symbolOverrides: (config.symbolOverrides as Record<string, { tradeAmount?: number | null; minConfidence?: number | null; takeProfitPercent?: number | null; stopLossPercent?: number | null }>) ?? {},
-        leverage: config.leverage ?? 10,
-        marginType: (config.marginType as "ISOLATED" | "CROSSED") ?? "ISOLATED",
-        notifyOnError: config.notifyOnError ?? true,
-        useTrailingStop: config.useTrailingStop ?? false,
-        trailingActivatePercent: config.trailingActivatePercent ?? 1.0,
-        trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
-        usePartialTp: config.usePartialTp ?? false,
-        partialTpPercent: config.partialTpPercent ?? 50,
-        entryMode: (config.entryMode as "fixed" | "full") ?? "fixed",
- // paper_trading(서버명)과 paperTrading(UI명) 둘 다 확인하고, 없으면 true
-paperTrading: config.paperTrading ?? false,
-        checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
-      });
-    }
-  }, [config, form]);
+useEffect(() => {
+  if (config) {
+    const ws = config.watchSymbols && config.watchSymbols.length > 0 ? config.watchSymbols : [config.symbol];
+    form.reset({
+      symbol: config.symbol,
+      watchSymbols: ws,
+      timeframe: config.timeframe,
+      tradeAmount: config.tradeAmount,
+      maxPositions: config.maxPositions,
+      stopLossPercent: config.stopLossPercent,
+      takeProfitPercent: config.takeProfitPercent,
+      minConfidence: config.minConfidence,
+      autoTrade: config.autoTrade,
+      useAiTargets: config.useAiTargets ?? true,
+      maxDailyLossPercent: config.maxDailyLossPercent ?? 3,
+      useMtfFilter: config.useMtfFilter ?? true,
+      strictMtf: config.strictMtf ?? true,
+      mtfTimeframes: config.mtfTimeframes && config.mtfTimeframes.length > 0 ? config.mtfTimeframes : ["1h", "4h"],
+      useFundingRate: config.useFundingRate ?? true,
+      symbolOverrides: (config.symbolOverrides as Record<string, { tradeAmount?: number | null; minConfidence?: number | null; takeProfitPercent?: number | null; stopLossPercent?: number | null }>) ?? {},
+      leverage: config.leverage ?? 10,
+      marginType: (config.marginType as "ISOLATED" | "CROSSED") ?? "ISOLATED",
+      notifyOnError: config.notifyOnError ?? true,
+      useTrailingStop: config.useTrailingStop ?? false,
+      trailingActivatePercent: config.trailingActivatePercent ?? 1.0,
+      trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
+      usePartialTp: config.usePartialTp ?? false,
+      partialTpPercent: config.partialTpPercent ?? 50,
+      entryMode: (config.entryMode as "fixed" | "full") ?? "fixed",
+      paperTrading: config.paperTrading ?? false,
+      checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
+    });
+  }
+}, [config, form]);
 
   const onSubmit = (data: BotConfigFormValues) => {
     const payload = { ...data, symbol: data.watchSymbols[0] ?? data.symbol };
