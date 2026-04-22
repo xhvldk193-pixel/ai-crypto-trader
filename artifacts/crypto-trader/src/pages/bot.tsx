@@ -166,7 +166,7 @@ useEffect(() => {
       checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
     });
   }
-}, [config, form]);
+}, [config]);
 
   const onSubmit = (data: BotConfigFormValues) => {
     const payload = { ...data, symbol: data.watchSymbols[0] ?? data.symbol };
