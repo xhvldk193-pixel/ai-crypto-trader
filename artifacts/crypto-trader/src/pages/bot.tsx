@@ -923,7 +923,7 @@ paperTrading: config.paperTrading ?? false,
                   <div key={r.id} className="border border-border rounded-md p-3 bg-card/50">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
                       <Badge variant={isWin ? "default" : "destructive"} className={isWin ? "bg-green-600 hover:bg-green-700" : ""}>
-                        {isWin ? "✓ 익절 (TP)" : r.exitReason === "SL" ? "✗ 손절 (SL)" : r.exitReason}
+                        {isWin ? "✓ 익절 (TP)" : r.exitReason === "SL" ? "✗ 손절! (SL)" : r.exitReason}
                       </Badge>
                       <Badge variant="outline">{r.symbol}</Badge>
                       <Badge variant="outline" className="uppercase">{r.side}</Badge>
