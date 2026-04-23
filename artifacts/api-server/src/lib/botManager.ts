@@ -93,10 +93,9 @@ class BotManager {
   private startTime: number | null = null;
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
-  // ── [추가] TP/SL 전용 감시 interval ──
   private positionIntervalId: ReturnType<typeof setInterval> | null = null;
   private positionCheckInFlight = false;
-  private readonly POSITION_CHECK_INTERVAL_MS = 30 * 1000; // 30초마다 TP/SL 감시
+  private readonly POSITION_CHECK_INTERVAL_MS = 30 * 1000;
 
   private totalSignals = 0;
   private executedTrades = 0;
@@ -111,7 +110,6 @@ class BotManager {
   private dailyPnlPercent = 0;
   private dailyResetDay: number = startOfTodayUtc().getTime();
 
-  // ── config 캐시: reloadConfig() 또는 start() 시에만 갱신 ──
   private cachedConfig: BotConfigRow | null = null;
 
   getStatus(): BotStatus {
@@ -138,7 +136,6 @@ class BotManager {
 
     await this.addLog("info", "트레이딩 봇이 시작되었습니다.");
 
-    // Reconcile DB phantoms before first tick
     try {
       await this.syncWithExchange("auto");
     } catch (err) {
@@ -149,10 +146,7 @@ class BotManager {
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
 
-    // ── AI 분석 주기 (15분봉 기준 900초)
     this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
-
-    // ── [추가] TP/SL 전용 감시 주기 (30초) — AI 호출 없이 포지션만 체크
     this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
 
     this.tick().catch((err) => logger.error({ err }, "Bot tick error"));
@@ -166,7 +160,6 @@ class BotManager {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    // ── [추가] TP/SL 감시 interval 정리
     if (this.positionIntervalId) {
       clearInterval(this.positionIntervalId);
       this.positionIntervalId = null;
@@ -182,14 +175,12 @@ class BotManager {
     if (this.intervalId) clearInterval(this.intervalId);
     this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
 
-    // ── [추가] TP/SL interval도 재시작
     if (this.positionIntervalId) clearInterval(this.positionIntervalId);
     this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
 
     await this.addLog("info", `봇 설정이 재로딩되었습니다: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
   }
 
-  /** Manually clear today's halt (e.g. user override) */
   resetHalt() {
     this.halted = false;
     this.dailyResetDay = startOfTodayUtc().getTime();
@@ -203,21 +194,16 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
-// 206라인부터 시작하는 getConfig 함수를 이렇게 수정하세요.
-private async getConfig(): Promise<BotConfigRow> {
-  // 캐시가 있더라도 무조건 무시하고 DB에서 새로 가져오게 만듭니다.
-  const rows = await db.select().from(botConfigTable).limit(1);
-  
-  if (rows.length === 0) {
-    const [created] = await db.insert(botConfigTable).values({}).returning();
-    this.cachedConfig = created;
-    return created;
+  private async getConfig(): Promise<BotConfigRow> {
+    const rows = await db.select().from(botConfigTable).limit(1);
+    if (rows.length === 0) {
+      const [created] = await db.insert(botConfigTable).values({}).returning();
+      this.cachedConfig = created;
+      return created;
+    }
+    this.cachedConfig = rows[0];
+    return rows[0];
   }
-
-  // 매번 DB의 최신값을 캐시에 저장하고 반환합니다.
-  this.cachedConfig = rows[0];
-  return rows[0];
-}
 
   private async refreshDailyPnl(config: BotConfigRow): Promise<void> {
     const today = startOfTodayUtc().getTime();
@@ -248,18 +234,17 @@ private async getConfig(): Promise<BotConfigRow> {
 
     const maxLoss = config.maxDailyLossPercent > 0 ? config.maxDailyLossPercent : 5;
     if (this.dailyPnlPercent <= -maxLoss && !this.halted) {
-    this.halted = true;
+      this.halted = true;
       const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
       await this.addLog("error", msg).catch(() => {});
       await this.maybeNotify("error", msg, config, "daily-loss-halt");
     }
   }
 
-  // ── [추가] TP/SL 전용 tick — AI 분석 없이 포지션 관리만 수행
   private async positionTick() {
     if (!this.running) return;
-    if (this.positionCheckInFlight) return; // 중복 실행 방지
-    if (this.tickInFlight) return; // 메인 tick과 충돌 방지
+    if (this.positionCheckInFlight) return;
+    if (this.tickInFlight) return;
 
     this.positionCheckInFlight = true;
     try {
@@ -289,8 +274,6 @@ private async getConfig(): Promise<BotConfigRow> {
 
       await this.refreshDailyPnl(config);
 
-      // ── tick에서는 manageActivePositions 스킵 (positionTick이 30초마다 처리)
-      // 단, halted 상태 로그는 유지
       if (this.halted) {
         await this.addLog("warning", `🛑 손실 한도 도달 상태 — 신규 진입 건너뜀 (오늘 PnL ${this.dailyPnlPercent.toFixed(2)}%)`);
         return;
@@ -502,13 +485,13 @@ private async getConfig(): Promise<BotConfigRow> {
     this.lastSignal = decision.action;
 
     if (decision.action === "HOLD") {
-  await this.addLog(
-    "info",
-    `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}) | ${decision.reasoning}`,
-    symbol
-  );
-  return;
-}
+      await this.addLog(
+        "info",
+        `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}) | ${decision.reasoning}`,
+        symbol
+      );
+      return;
+    }
 
     await db.insert(aiSignalsTable).values({
       symbol,
@@ -578,7 +561,9 @@ private async getConfig(): Promise<BotConfigRow> {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
 
-      const isPaper = config.paperTrading ?? True;
+      // ✅ 수정1: True → true, paperTrade → paperTrading
+      const isPaper = config.paperTrading ?? true;
+
       if (!isPaper && (config.entryMode ?? "fixed") === "full") {
         try {
           const bal = await exchangeService.getBalance();
@@ -755,6 +740,7 @@ private async getConfig(): Promise<BotConfigRow> {
           }).returning();
 
           if (reflectionRow) {
+            // ✅ 수정2: leverage 추가 (진입 실패 시)
             this.writeReflectionLesson(reflectionRow.id, {
               symbol,
               timeframe: config.timeframe,
@@ -769,6 +755,7 @@ private async getConfig(): Promise<BotConfigRow> {
               originalReasoning: decision.reasoning,
               bullishCount,
               bearishCount,
+              leverage: config.leverage ?? 10,
               failureMessage: msg,
             }).catch((e) => logger.warn({ err: e, id: reflectionRow.id }, "Failed-entry reflection lesson generation failed"));
           }
@@ -1056,6 +1043,7 @@ private async getConfig(): Promise<BotConfigRow> {
         }).catch((err) => logger.warn({ err }, "Failed to send exit notification"));
 
         if (reflectionRow) {
+          // ✅ 수정3: leverage 추가 (TP/SL 청산 시)
           this.writeReflectionLesson(reflectionRow.id, {
             symbol: pos.symbol,
             timeframe: timeframe ?? "15m",
@@ -1070,6 +1058,7 @@ private async getConfig(): Promise<BotConfigRow> {
             originalReasoning: originalReasoning ?? null,
             bullishCount,
             bearishCount,
+            leverage,
           }).catch((err) => logger.warn({ err, id: reflectionRow.id }, "Reflection lesson generation failed"));
         }
       } catch (err) {
@@ -1125,10 +1114,13 @@ private async getConfig(): Promise<BotConfigRow> {
     originalReasoning: string | null;
     bullishCount: number;
     bearishCount: number;
+    leverage?: number;
     failureMessage?: string;
   }) {
     const isFailedEntry = ctx.exitReason === "ENTRY_FAILED";
     const verdict = isFailedEntry ? "진입실패" : ctx.exitReason === "TP" ? "성공(익절)" : "실패(손절)";
+    const leverage = ctx.leverage ?? 10;
+    const rawPnlPercent = ctx.pnlPercent / leverage;
 
     const tradeInfo = isFailedEntry
       ? `심볼: ${ctx.symbol} | 방향: ${ctx.side.toUpperCase()} | 결과: ${verdict}
@@ -1139,7 +1131,7 @@ AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100)
 진입 근거: ${ctx.originalReasoning ?? "기록 없음"}
 실패 메시지: ${ctx.failureMessage ?? "알 수 없음"}`
       : `심볼: ${ctx.symbol} | 방향: ${ctx.side.toUpperCase()} | 결과: ${verdict}
-손익: ${ctx.pnlPercent >= 0 ? "+" : ""}${ctx.pnlPercent.toFixed(2)}% | 보유: ${Math.floor(ctx.holdSeconds / 60)}분
+손익: ${ctx.pnlPercent >= 0 ? "+" : ""}${ctx.pnlPercent.toFixed(2)}% (레버리지 ${leverage}배 적용 / 실제 가격 변동 ${rawPnlPercent >= 0 ? "+" : ""}${rawPnlPercent.toFixed(2)}%) | 보유: ${Math.floor(ctx.holdSeconds / 60)}분
 진입가: $${ctx.entryPrice.toFixed(4)} → 청산가: $${ctx.exitPrice.toFixed(4)}
 강세 다이버전스: ${ctx.bullishCount}개 / 약세: ${ctx.bearishCount}개
 AI 신뢰도: ${ctx.originalConfidence !== null ? (ctx.originalConfidence * 100).toFixed(0) + "%" : "미상"}
