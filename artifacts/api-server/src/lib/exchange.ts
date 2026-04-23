@@ -322,8 +322,9 @@ export const exchangeService = {
     }
 
     const params: Record<string, unknown> = {
-      positionSide: positionSide, // 비트겟 헤지 모드
-    };
+  oneWayMode: false,
+  holdSide: positionSide.toLowerCase(), // 비트겟은 'long'/'short' 소문자
+};
     if (opts.reduceOnly) params.reduceOnly = true;
     if (type === "limit" && price) params.price = price;
 
