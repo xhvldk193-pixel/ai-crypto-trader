@@ -235,7 +235,7 @@ class BotManager {
     const maxLoss = config.maxDailyLossPercent > 0 ? config.maxDailyLossPercent : 5;
     if (this.dailyPnlPercent <= -maxLoss && !this.halted) {
       this.halted = true;
-      const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단`;
+      const msg = `🛑 일일 손실 한도 도달 (${this.dailyPnlPercent.toFixed(2)}%) — 오늘 자동 거래 중단` ;
       await this.addLog("error", msg).catch(() => {});
       await this.maybeNotify("error", msg, config, "daily-loss-halt");
     }
