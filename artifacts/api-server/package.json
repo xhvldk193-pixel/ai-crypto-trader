@@ -24,7 +24,8 @@
     "express-session": "^1.19.0",
     "helmet": "^8.1.0",
     "pino": "^9",
-    "pino-http": "^10"
+    "pino-http": "^10",
+    "protobufjs": "^8.0.1"
   },
   "devDependencies": {
     "@types/connect-pg-simple": "^7.0.3",
