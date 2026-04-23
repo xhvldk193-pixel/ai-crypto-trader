@@ -1327,8 +1327,8 @@ ${reflections}
 
 Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.
 승률이 낮은 신호 조합(<50%)이면 confidence를 낮추거나 HOLD를 우선하세요.
-위 복기 노트의 교훈을 반드시 reasoning에 1번 이상 반영하세요.`;
-
+위 복기 노트의 교훈을 반드시 reasoning에 1번 이상 반영하세요.
+중요: 복기 데이터가 20건 미만이면 복기 노트와 통계는 완전히 무시하고 현재 기술적 신호(다이버전스 강도, ATR, 펀딩비)만으로 판단하세요. 데이터 부족 상태에서 과거 손절 패턴을 일반화하지 마세요. confidence는 신호 강도와 ATR만 기준으로 산출하세요.;
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,
       max_tokens: 1024,
