@@ -178,7 +178,7 @@ class BotManager {
     if (this.positionIntervalId) clearInterval(this.positionIntervalId);
     this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
 
-    await this.addLog("info", `봇 설정이 재로딩되었습니다: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
+    await this.addLog("info", `봇 설정이 재로딩되었습니다.: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
   }
 
   resetHalt() {
