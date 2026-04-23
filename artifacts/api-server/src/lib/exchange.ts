@@ -230,7 +230,7 @@ export const exchangeService = {
         balances: [{ asset: "USDT", free: demoWallet, locked: 0, usdValue: demoWallet }],
       };
     }
-    const data = await ex.fetchBalance();
+    const data = await ex.fetchBalance({ type: 'swap' })
     const usdt = data.USDT ?? data["USDT"] ?? {};
     const free = (usdt.free as number) ?? 0;
     const total = (usdt.total as number) ?? 0;
