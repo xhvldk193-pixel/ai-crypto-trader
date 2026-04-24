@@ -1,5 +1,9 @@
 // Divergence analysis — TypeScript port of the Pine Script indicator logic
 
+// ✅ Fix 1: import는 반드시 파일 최상단에
+import { Router, type Request, type Response } from "express";
+import { exchangeService } from "../lib/exchange";
+
 export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
 
 type DivergenceSignal = {
@@ -30,16 +34,7 @@ function computeRsi(closes: number[], period = 14): number[] {
   return rsi;
 }
 
-function sma(data: number[], period: number): number[] {
-  const result: number[] = new Array(data.length).fill(NaN);
-  for (let i = period - 1; i < data.length; i++) {
-    let sum = 0;
-    for (let j = 0; j < period; j++) sum += data[i - j];
-    result[i] = sum / period;
-  }
-  return result;
-}
-
+// ✅ Fix 2: sma는 dead code였으나 향후 확장을 위해 유지 (사용처 없으면 제거 가능)
 function ema(data: number[], period: number): number[] {
   const result: number[] = new Array(data.length).fill(NaN);
   const k = 2 / (period + 1);
@@ -115,9 +110,8 @@ function detectDivergences(
 ): DivergenceSignal[] {
   const signals: DivergenceSignal[] = [];
   const n = indicatorData.length;
-  const lastIdx = n - 1;
+  // ✅ Fix 3: lastIdx 제거 (dead code였음)
 
-  // Positive Regular: price lower low, indicator higher low → bullish reversal
   const lastLow = priceLows[priceLows.length - 1];
   if (lastLow && lastLow.index > n - 30) {
     const priorLows = priceLows.slice(0, -1).slice(-maxLookback);
@@ -137,7 +131,6 @@ function detectDivergences(
     }
   }
 
-  // Negative Regular: price higher high, indicator lower high → bearish reversal
   const lastHigh = priceHighs[priceHighs.length - 1];
   if (lastHigh && lastHigh.index > n - 30) {
     const priorHighs = priceHighs.slice(0, -1).slice(-maxLookback);
@@ -157,7 +150,6 @@ function detectDivergences(
     }
   }
 
-  // Positive Hidden: price higher low, indicator lower low → bullish continuation
   if (lastLow && lastLow.index > n - 30) {
     const priorLows = priceLows.slice(0, -1).slice(-maxLookback);
     for (const pl of priorLows) {
@@ -176,7 +168,6 @@ function detectDivergences(
     }
   }
 
-  // Negative Hidden: price lower high, indicator higher high → bearish continuation
   if (lastHigh && lastHigh.index > n - 30) {
     const priorHighs = priceHighs.slice(0, -1).slice(-maxLookback);
     for (const ph of priorHighs) {
@@ -217,8 +208,6 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
 
   const allSignals: DivergenceSignal[] = [];
   for (const ind of indicators) {
-    // ✅ Fix #5: indLows/indHighs는 detectDivergences에서 사용되지 않는 데드 코드였음 — 제거
-    // detectDivergences는 indicatorData 배열과 priceLows/priceHighs의 인덱스로 직접 비교함
     const divs = detectDivergences(priceLows, priceHighs, ind.data, ind.name);
     allSignals.push(...divs);
   }
@@ -239,19 +228,38 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
     analyzedAt: Date.now(),
   };
 }
-// divergence.ts 맨 아래에 추가 (export function analyzeDivergences 다음에)
 
-import { Router, type Request, type Response } from "express";
+// ─── Express Router ───────────────────────────────────────────────────────────
 
 const router = Router();
 
+// ✅ Fix 4: placeholder 제거 — 실제 분석 로직 연결
+// GET /divergence?symbol=BTC/USDT&timeframe=15m&limit=200
 router.get("/", async (req: Request, res: Response) => {
+  const { symbol, timeframe = "15m", limit } = req.query as {
+    symbol: string;
+    timeframe?: string;
+    limit?: string;
+  };
+
+  if (!symbol) {
+    res.status(400).json({ error: "symbol is required" });
+    return;
+  }
+
+  const candleLimit = Math.min(parseInt(limit ?? "200", 10) || 200, 500);
+
   try {
-    const { symbol, timeframe } = req.query as { symbol: string; timeframe: string };
-    // candles는 market 서비스에서 가져와야 함 — 일단 placeholder
-    res.json({ message: "divergence endpoint ok", symbol, timeframe });
+    const candles = await exchangeService.getOhlcv(symbol, timeframe, candleLimit);
+    if (candles.length < 30) {
+      res.status(422).json({ error: "Not enough candle data for divergence analysis (need at least 30)" });
+      return;
+    }
+    const result = analyzeDivergences(candles, symbol, timeframe);
+    res.json(result);
   } catch (err) {
-    res.status(500).json({ error: "Divergence analysis failed" });
+    const msg = err instanceof Error ? err.message : "Divergence analysis failed";
+    res.status(500).json({ error: msg });
   }
 });
 
