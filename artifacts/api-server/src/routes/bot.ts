@@ -1,8 +1,9 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { botConfigTable, botLogsTable, tradeHistoryTable, tradeReflectionsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { botManager } from "../lib/botManager";
+import { botEvents, type BotEvent } from "../lib/events";
 
 const router = Router();
 
@@ -62,6 +63,48 @@ const ALLOWED_MARGIN_TYPES = ["ISOLATED", "CROSSED"];
 router.get("/status", async (_req, res) => {
   const status = botManager.getStatus();
   res.json(status);
+});
+
+// ─────────────────────────────────────────────────────
+// SSE — 봇 상태/로그/포지션 이벤트를 실시간 스트리밍
+// 클라이언트: const es = new EventSource('/api/bot/stream')
+// 이벤트 타입은 data 페이로드의 `type` 필드로 구분 (log | status | position)
+// ─────────────────────────────────────────────────────
+router.get("/stream", (req: Request, res: Response) => {
+  // SSE 헤더
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // nginx 버퍼링 비활성
+  res.flushHeaders();
+
+  // 연결 직후 현재 상태 스냅샷 1회 전송
+  const snapshot = {
+    type: "status" as const,
+    ...botManager.getStatus(),
+    timestamp: Date.now(),
+  };
+  res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+
+  // 이벤트 구독
+  const listener = (evt: BotEvent) => {
+    try {
+      res.write(`data: ${JSON.stringify(evt)}\n\n`);
+    } catch { /* 연결이 이미 닫혔을 수 있음 — close 핸들러가 정리 */ }
+  };
+  botEvents.on("event", listener);
+
+  // 15초마다 heartbeat — 프록시 타임아웃 방지
+  const heartbeat = setInterval(() => {
+    try { res.write(`: heartbeat\n\n`); } catch { /* ignore */ }
+  }, 15_000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    botEvents.off("event", listener);
+  };
+  req.on("close", cleanup);
+  req.on("error", cleanup);
 });
 
 router.post("/start", async (_req, res) => {
