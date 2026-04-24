@@ -216,11 +216,26 @@ router.put("/config", async (req, res) => {
     // ── 반대 신호 조기 청산
     if (body.useEarlyExitOnOpposite !== undefined) updateData.useEarlyExitOnOpposite = Boolean(body.useEarlyExitOnOpposite);
     setIfValidNumber(updateData, "earlyExitOppositeCount", body.earlyExitOppositeCount, { min: 1, max: 10, integer: true });
-
-    // ── 저변동성 TP 하향 조정
+    // ── 저변동성 TP 하향
     if (body.useLowVolTpReduction !== undefined) updateData.useLowVolTpReduction = Boolean(body.useLowVolTpReduction);
     setIfValidNumber(updateData, "lowVolAtrThreshold", body.lowVolAtrThreshold, { min: 0.1, max: 5.0 });
     setIfValidNumber(updateData, "lowVolTpMultiplier", body.lowVolTpMultiplier, { min: 0.1, max: 1.0 });
+    // ── AI 포지션 사이즈
+    if (body.useAiPositionSize !== undefined) updateData.useAiPositionSize = Boolean(body.useAiPositionSize);
+    setIfValidNumber(updateData, "aiPositionSizeMin", body.aiPositionSizeMin, { min: 0.1, max: 1.0 });
+    setIfValidNumber(updateData, "aiPositionSizeMax", body.aiPositionSizeMax, { min: 1.0, max: 3.0 });
+    // ── AI 레버리지
+    if (body.useAiLeverage !== undefined) updateData.useAiLeverage = Boolean(body.useAiLeverage);
+    setIfValidNumber(updateData, "aiLeverageMin", body.aiLeverageMin, { min: 1, max: 125, integer: true });
+    setIfValidNumber(updateData, "aiLeverageMax", body.aiLeverageMax, { min: 1, max: 125, integer: true });
+    // ── 멀티 AI 합의제
+    if (body.useMultiAiConsensus !== undefined) updateData.useMultiAiConsensus = Boolean(body.useMultiAiConsensus);
+    // ── AI 동적 TP
+    if (body.useAiDynamicTp !== undefined) updateData.useAiDynamicTp = Boolean(body.useAiDynamicTp);
+    // ── 심볼 거래 금지
+    if (body.useAiSymbolBlock !== undefined) updateData.useAiSymbolBlock = Boolean(body.useAiSymbolBlock);
+    // ── 복기 자가 수정
+    if (body.useAiAutoTune !== undefined) updateData.useAiAutoTune = Boolean(body.useAiAutoTune);
 
     // symbolOverrides 객체
     if (body.symbolOverrides !== undefined && body.symbolOverrides && typeof body.symbolOverrides === "object") {
@@ -360,11 +375,21 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     partialTpPercent: row.partialTpPercent,
     paperTrading: row.paperTrading,
     entryMode: row.entryMode,
-    useEarlyExitOnOpposite: row.useEarlyExitOnOpposite,
-    earlyExitOppositeCount: row.earlyExitOppositeCount,
-    useLowVolTpReduction: row.useLowVolTpReduction,
-    lowVolAtrThreshold: row.lowVolAtrThreshold,
-    lowVolTpMultiplier: row.lowVolTpMultiplier,
+    useEarlyExitOnOpposite: (row as Record<string, unknown>).useEarlyExitOnOpposite as boolean ?? false,
+    earlyExitOppositeCount: (row as Record<string, unknown>).earlyExitOppositeCount as number ?? 3,
+    useLowVolTpReduction: (row as Record<string, unknown>).useLowVolTpReduction as boolean ?? false,
+    lowVolAtrThreshold: (row as Record<string, unknown>).lowVolAtrThreshold as number ?? 0.5,
+    lowVolTpMultiplier: (row as Record<string, unknown>).lowVolTpMultiplier as number ?? 0.6,
+    useAiPositionSize: (row as Record<string, unknown>).useAiPositionSize as boolean ?? false,
+    aiPositionSizeMin: (row as Record<string, unknown>).aiPositionSizeMin as number ?? 0.3,
+    aiPositionSizeMax: (row as Record<string, unknown>).aiPositionSizeMax as number ?? 1.5,
+    useAiLeverage: (row as Record<string, unknown>).useAiLeverage as boolean ?? false,
+    aiLeverageMin: (row as Record<string, unknown>).aiLeverageMin as number ?? 1,
+    aiLeverageMax: (row as Record<string, unknown>).aiLeverageMax as number ?? 10,
+    useMultiAiConsensus: (row as Record<string, unknown>).useMultiAiConsensus as boolean ?? false,
+    useAiDynamicTp: (row as Record<string, unknown>).useAiDynamicTp as boolean ?? false,
+    useAiSymbolBlock: (row as Record<string, unknown>).useAiSymbolBlock as boolean ?? false,
+    useAiAutoTune: (row as Record<string, unknown>).useAiAutoTune as boolean ?? false,
   };
 }
 
