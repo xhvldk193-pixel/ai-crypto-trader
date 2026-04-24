@@ -443,12 +443,12 @@ class BotManager {
       // ✅ 트랜잭션 제거 — 직접 select 후 insert
       try {
         const txExisting = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
-          const existing = await tx.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
+          const existing = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
           if (existing.length > 0) {
             return;
           }
           const quantity = params.tradeAmount / entryPrice;
-          await tx.insert(activePositionsTable).values({
+          await db.insert(activePositionsTable).values({
             symbol,
             side,
             entryPrice,
