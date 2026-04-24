@@ -57,13 +57,21 @@ const botConfigSchema = z.object({
   entryMode: z.enum(["fixed", "full"]),
   paperTrading: z.boolean(),
   checkIntervalSeconds: z.coerce.number().int().min(60),
-  // 반대 신호 조기 청산
   useEarlyExitOnOpposite: z.boolean(),
   earlyExitOppositeCount: z.coerce.number().int().min(1).max(10),
-  // 저변동성 TP 하향
   useLowVolTpReduction: z.boolean(),
   lowVolAtrThreshold: z.coerce.number().min(0.1).max(5.0),
   lowVolTpMultiplier: z.coerce.number().min(0.1).max(1.0),
+  useAiPositionSize: z.boolean(),
+  aiPositionSizeMin: z.coerce.number().min(0.1).max(1.0),
+  aiPositionSizeMax: z.coerce.number().min(1.0).max(3.0),
+  useAiLeverage: z.boolean(),
+  aiLeverageMin: z.coerce.number().int().min(1).max(125),
+  aiLeverageMax: z.coerce.number().int().min(1).max(125),
+  useMultiAiConsensus: z.boolean(),
+  useAiDynamicTp: z.boolean(),
+  useAiSymbolBlock: z.boolean(),
+  useAiAutoTune: z.boolean(),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -137,6 +145,16 @@ export default function BotControl() {
       useLowVolTpReduction: false,
       lowVolAtrThreshold: 0.5,
       lowVolTpMultiplier: 0.6,
+      useAiPositionSize: false,
+      aiPositionSizeMin: 0.3,
+      aiPositionSizeMax: 1.5,
+      useAiLeverage: false,
+      aiLeverageMin: 1,
+      aiLeverageMax: 10,
+      useMultiAiConsensus: false,
+      useAiDynamicTp: false,
+      useAiSymbolBlock: false,
+      useAiAutoTune: false,
     },
   });
 
@@ -146,6 +164,8 @@ export default function BotControl() {
   const entryModeValue = form.watch("entryMode");
   const useEarlyExitValue = form.watch("useEarlyExitOnOpposite");
   const useLowVolValue = form.watch("useLowVolTpReduction");
+  const useAiPositionSizeValue = form.watch("useAiPositionSize");
+  const useAiLeverageValue = form.watch("useAiLeverage");
 
 useEffect(() => {
   if (config) {
@@ -175,7 +195,7 @@ useEffect(() => {
       trailingDistancePercent: config.trailingDistancePercent ?? 0.5,
       usePartialTp: config.usePartialTp ?? false,
       partialTpPercent: config.partialTpPercent ?? 50,
-    entryMode: (config.entryMode === "full" ? "full" : "fixed") as "fixed" | "full",
+      entryMode: (config.entryMode === "full" ? "full" : "fixed") as "fixed" | "full",
       paperTrading: config.paperTrading ?? false,
       checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
       useEarlyExitOnOpposite: (config as Record<string, unknown>).useEarlyExitOnOpposite as boolean ?? false,
@@ -183,6 +203,16 @@ useEffect(() => {
       useLowVolTpReduction: (config as Record<string, unknown>).useLowVolTpReduction as boolean ?? false,
       lowVolAtrThreshold: (config as Record<string, unknown>).lowVolAtrThreshold as number ?? 0.5,
       lowVolTpMultiplier: (config as Record<string, unknown>).lowVolTpMultiplier as number ?? 0.6,
+      useAiPositionSize: (config as Record<string, unknown>).useAiPositionSize as boolean ?? false,
+      aiPositionSizeMin: (config as Record<string, unknown>).aiPositionSizeMin as number ?? 0.3,
+      aiPositionSizeMax: (config as Record<string, unknown>).aiPositionSizeMax as number ?? 1.5,
+      useAiLeverage: (config as Record<string, unknown>).useAiLeverage as boolean ?? false,
+      aiLeverageMin: (config as Record<string, unknown>).aiLeverageMin as number ?? 1,
+      aiLeverageMax: (config as Record<string, unknown>).aiLeverageMax as number ?? 10,
+      useMultiAiConsensus: (config as Record<string, unknown>).useMultiAiConsensus as boolean ?? false,
+      useAiDynamicTp: (config as Record<string, unknown>).useAiDynamicTp as boolean ?? false,
+      useAiSymbolBlock: (config as Record<string, unknown>).useAiSymbolBlock as boolean ?? false,
+      useAiAutoTune: (config as Record<string, unknown>).useAiAutoTune as boolean ?? false,
     });
   }
 }, [config]);
@@ -868,90 +898,156 @@ useEffect(() => {
 
                   {/* ── 반대 신호 조기 청산 ── */}
                   <div className="space-y-3 rounded-lg border p-4">
-                    <FormField
-                      control={form.control}
-                      name="useEarlyExitOnOpposite"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base">반대 신호 조기 청산</FormLabel>
-                            <FormDescription>
-                              보유 중 반대 방향 다이버전스가 설정 개수 이상 발생하면 즉시 청산합니다.
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
+                    <FormField control={form.control} name="useEarlyExitOnOpposite" render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">반대 신호 조기 청산</FormLabel>
+                          <FormDescription>보유 중 반대 방향 다이버전스가 설정 개수 이상이면 즉시 청산합니다.</FormDescription>
+                        </div>
+                        <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                      </FormItem>
+                    )} />
                     {useEarlyExitValue && (
-                      <FormField
-                        control={form.control}
-                        name="earlyExitOppositeCount"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">반대 신호 임계값 (개)</FormLabel>
-                            <FormControl>
-                              <Input type="number" min={1} max={10} step={1} {...field} />
-                            </FormControl>
-                            <FormDescription className="text-xs">반대 방향 다이버전스가 이 값 이상이면 청산 (기본 3개)</FormDescription>
-                          </FormItem>
-                        )}
-                      />
+                      <FormField control={form.control} name="earlyExitOppositeCount" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">반대 신호 임계값 (개)</FormLabel>
+                          <FormControl><Input type="number" min={1} max={10} step={1} {...field} /></FormControl>
+                          <FormDescription className="text-xs">반대 다이버전스가 이 값 이상이면 청산 (기본 3)</FormDescription>
+                        </FormItem>
+                      )} />
                     )}
                   </div>
 
-                  {/* ── 저변동성 TP 하향 조정 ── */}
+                  {/* ── 저변동성 TP 하향 ── */}
                   <div className="space-y-3 rounded-lg border p-4">
-                    <FormField
-                      control={form.control}
-                      name="useLowVolTpReduction"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base">저변동성 목표 수익률 하향</FormLabel>
-                            <FormDescription>
-                              ATR%가 임계값 미만인 낮은 변동성 환경에서 목표 수익(TP)을 자동으로 줄입니다.
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
+                    <FormField control={form.control} name="useLowVolTpReduction" render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">저변동성 목표 수익률 하향</FormLabel>
+                          <FormDescription>ATR%가 임계값 미만이면 TP를 자동으로 줄입니다.</FormDescription>
+                        </div>
+                        <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                      </FormItem>
+                    )} />
                     {useLowVolValue && (
                       <div className="space-y-3 pl-1">
-                        <FormField
-                          control={form.control}
-                          name="lowVolAtrThreshold"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className="text-xs">ATR% 임계값</FormLabel>
-                              <FormControl>
-                                <Input type="number" min={0.1} max={5} step={0.1} {...field} />
-                              </FormControl>
-                              <FormDescription className="text-xs">이 값 미만의 ATR%를 저변동성으로 판단 (기본 0.5%)</FormDescription>
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="lowVolTpMultiplier"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className="text-xs">TP 축소 비율 (0.1 ~ 1.0)</FormLabel>
-                              <FormControl>
-                                <Input type="number" min={0.1} max={1.0} step={0.05} {...field} />
-                              </FormControl>
-                              <FormDescription className="text-xs">TP를 원래의 이 비율만큼 축소 (기본 0.6 = 60%)</FormDescription>
-                            </FormItem>
-                          )}
-                        />
+                        <FormField control={form.control} name="lowVolAtrThreshold" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">ATR% 임계값 (기본 0.5%)</FormLabel>
+                            <FormControl><Input type="number" min={0.1} max={5} step={0.1} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="lowVolTpMultiplier" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">TP 축소 비율 (기본 0.6 = 60%)</FormLabel>
+                            <FormControl><Input type="number" min={0.1} max={1.0} step={0.05} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
                       </div>
                     )}
                   </div>
+
+                  {/* ── AI 포지션 사이즈 ── */}
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <FormField control={form.control} name="useAiPositionSize" render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">AI 포지션 사이즈 결정</FormLabel>
+                          <FormDescription>AI가 신뢰도/리스크 레벨 보고 거래금액 배수를 자동 조정합니다.</FormDescription>
+                        </div>
+                        <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                      </FormItem>
+                    )} />
+                    {useAiPositionSizeValue && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <FormField control={form.control} name="aiPositionSizeMin" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">최소 배수 (기본 0.3×)</FormLabel>
+                            <FormControl><Input type="number" min={0.1} max={1.0} step={0.1} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="aiPositionSizeMax" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">최대 배수 (기본 1.5×)</FormLabel>
+                            <FormControl><Input type="number" min={1.0} max={3.0} step={0.1} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── AI 레버리지 결정 ── */}
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <FormField control={form.control} name="useAiLeverage" render={({ field }) => (
+                      <FormItem className="flex flex-row items-center justify-between">
+                        <div className="space-y-0.5">
+                          <FormLabel className="text-base">AI 레버리지 결정</FormLabel>
+                          <FormDescription>AI가 ATR/리스크 보고 레버리지를 범위 내에서 자동 조정합니다.</FormDescription>
+                        </div>
+                        <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                      </FormItem>
+                    )} />
+                    {useAiLeverageValue && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <FormField control={form.control} name="aiLeverageMin" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">최소 레버리지 (기본 1×)</FormLabel>
+                            <FormControl><Input type="number" min={1} max={125} step={1} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
+                        <FormField control={form.control} name="aiLeverageMax" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">최대 레버리지 (기본 10×)</FormLabel>
+                            <FormControl><Input type="number" min={1} max={125} step={1} {...field} /></FormControl>
+                          </FormItem>
+                        )} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── 멀티 AI 합의제 ── */}
+                  <FormField control={form.control} name="useMultiAiConsensus" render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">멀티 AI 합의제</FormLabel>
+                        <FormDescription>두 번째 AI 호출로 반론 검토 후 둘 다 동의할 때만 진입합니다. AI 비용 2배.</FormDescription>
+                      </div>
+                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                    </FormItem>
+                  )} />
+
+                  {/* ── AI 동적 TP 조정 ── */}
+                  <FormField control={form.control} name="useAiDynamicTp" render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">AI 보유 중 TP 동적 조정</FormLabel>
+                        <FormDescription>포지션 보유 중 30초마다 시장 재분석 후 TP를 실시간으로 상향 조정합니다.</FormDescription>
+                      </div>
+                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                    </FormItem>
+                  )} />
+
+                  {/* ── 심볼 거래 금지 판단 ── */}
+                  <FormField control={form.control} name="useAiSymbolBlock" render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">AI 심볼 거래 금지 판단</FormLabel>
+                        <FormDescription>AI가 복기/신호 분석 후 특정 심볼의 해당 tick 거래를 자율적으로 차단합니다.</FormDescription>
+                      </div>
+                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                    </FormItem>
+                  )} />
+
+                  {/* ── 복기 기반 자가 수정 ── */}
+                  <FormField control={form.control} name="useAiAutoTune" render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">AI 설정 자가 수정</FormLabel>
+                        <FormDescription>AI가 복기 분석 후 minConfidence / SL / TP 설정값을 자율적으로 조정합니다.</FormDescription>
+                      </div>
+                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                    </FormItem>
+                  )} />
 
                   <FormField
                     control={form.control}
