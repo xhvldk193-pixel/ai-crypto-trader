@@ -442,6 +442,7 @@ class BotManager {
 
       // ✅ 트랜잭션 제거 — 직접 select 후 insert
       try {
+<<<<<<< HEAD
         const txExisting = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
           const existing = await tx.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
           if (existing.length > 0) {
@@ -461,6 +462,22 @@ class BotManager {
             triggeredBy: isPaper ? "paper" : "bot",
           });
           positionInserted = true;
+=======
+        const existing = await db.select().from(activePositionsTable).where(
+          and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side))
+        );
+        if (existing.length > 0) {
+          await this.addLog("info", `${symbol} 이미 포지션 보유 중 (${side}) — 신규 진입 건너뜀`, symbol);
+          return;
+        }
+        const quantity = params.tradeAmount / entryPrice;
+        await db.insert(activePositionsTable).values({
+          symbol, side, entryPrice, quantity, takeProfit, stopLoss,
+          expectedMovePercent: decision.expectedMovePercent,
+          aiConfidence: decision.confidence,
+          aiReasoning: decision.reasoning,
+          triggeredBy: isPaper ? "paper" : "bot",
+>>>>>>> 5933303f8a7924f1a6d559f5c81c27120676b08a
         });
       } catch (err) {
         const errMsg = `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`;
