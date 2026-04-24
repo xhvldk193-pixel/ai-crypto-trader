@@ -93,7 +93,8 @@ export const activePositionsTable = pgTable("active_positions", {
   partialTpDone: boolean("partial_tp_done").notNull().default(false),
   openedAt: timestamp("opened_at").defaultNow().notNull(),
 }, (table) => ({
-  symbolUnique: uniqueIndex("active_positions_symbol_unique").on(table.symbol),
+  // ✅ Fix #1: (symbol + side) 조합으로 유니크 인덱스 — 같은 심볼에 롱/숏 동시 헤지 포지션 허용
+  symbolSideUnique: uniqueIndex("active_positions_symbol_side_unique").on(table.symbol, table.side),
 }));
 
 export const insertActivePositionSchema = createInsertSchema(activePositionsTable).omit({ id: true, openedAt: true });
