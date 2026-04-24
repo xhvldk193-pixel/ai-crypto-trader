@@ -39,6 +39,15 @@ export const botConfigTable = pgTable("bot_config", {
   partialTpPercent: real("partial_tp_percent").notNull().default(50.0),
   entryMode: text("entry_mode").notNull().default("fixed"),
   paperTrading: boolean("paper_trading").notNull().default(true),
+  // ── 반대 신호 조기 청산 ──────────────────────────────────────────────────────
+  // 보유 중 포지션 방향과 반대인 다이버전스가 이 횟수 이상 발생하면 즉시 청산
+  useEarlyExitOnOpposite: boolean("use_early_exit_on_opposite").notNull().default(false),
+  earlyExitOppositeCount: integer("early_exit_opposite_count").notNull().default(3),
+  // ── 저변동성 환경 TP 하향 조정 ───────────────────────────────────────────────
+  // ATR%가 이 임계값 미만이면 낮은 변동성으로 판단하여 TP를 비율만큼 축소
+  useLowVolTpReduction: boolean("use_low_vol_tp_reduction").notNull().default(false),
+  lowVolAtrThreshold: real("low_vol_atr_threshold").notNull().default(0.5),   // ATR% 기준값
+  lowVolTpMultiplier: real("low_vol_tp_multiplier").notNull().default(0.6),   // TP × 0.6
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
