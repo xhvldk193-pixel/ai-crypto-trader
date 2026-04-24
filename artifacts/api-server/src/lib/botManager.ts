@@ -649,7 +649,7 @@ class BotManager {
         if (isPaper) {
           await db.update(activePositionsTable)
             .set({ quantity })
-            .where(eq(activePositionsTable.symbol, symbol));
+            .where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         } else {
           const order = await exchangeService.placeOrder(
             symbol,
@@ -662,7 +662,7 @@ class BotManager {
           exchangeOrderId = order.id;
           await db.update(activePositionsTable)
             .set({ quantity })
-            .where(eq(activePositionsTable.symbol, symbol));
+            .where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         }
         this.executedTrades++;
 
