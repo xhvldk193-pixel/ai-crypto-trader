@@ -499,6 +499,19 @@ class BotManager {
         stopLoss = entryPrice * (1 - dir * params.stopLossPercent / 100);
       }
 
+      // ── 저변동성 환경 TP 하향 조정 ────────────────────────────────────────
+      if (config.useLowVolTpReduction && atrPercent !== null) {
+        const atrThreshold = config.lowVolAtrThreshold ?? 0.5;
+        const tpMultiplier = config.lowVolTpMultiplier ?? 0.6;
+        if (atrPercent < atrThreshold) {
+          const originalTp = takeProfit;
+          // TP를 진입가 기준으로 multiplier 비율만큼 축소
+          const tpDistance = Math.abs(takeProfit - entryPrice) * tpMultiplier;
+          takeProfit = entryPrice + dir * tpDistance;
+          await this.addLog("info", `${symbol} 저변동성 감지 (ATR ${atrPercent.toFixed(2)}% < ${atrThreshold}%) — TP 하향 조정 $${originalTp.toFixed(2)} → $${takeProfit.toFixed(2)} (×${tpMultiplier})`, symbol);
+        }
+      }
+
       // ✅ 수정 1+2: positionInserted 선언 추가, quantity 중복 선언 분리
       let positionInserted = false;
       const baseQuantity = params.tradeAmount / entryPrice;
@@ -670,6 +683,45 @@ class BotManager {
           }
         }
       }
+      // ── 반대 신호 조기 청산 ────────────────────────────────────────────────
+      if (cfg.useEarlyExitOnOpposite) {
+        const threshold = cfg.earlyExitOppositeCount ?? 3;
+        try {
+          const candles = await exchangeService.getOhlcv(pos.symbol, cfg.timeframe, 200);
+          if (candles.length >= 50) {
+            const div = analyzeDivergences(candles, pos.symbol, cfg.timeframe);
+            const oppositeCount = isLong ? div.bearishCount : div.bullishCount;
+            if (oppositeCount >= threshold) {
+              const isPaperPos = pos.triggeredBy === "paper";
+              const positionSide = isLong ? "LONG" : "SHORT";
+              const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
+              const leverage = cfg.leverage ?? 10;
+              const rawPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+              const pnlPct = rawPct * leverage;
+              const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
+              const earlyMsg = `${isPaperPos ? "[가상] " : ""}조기 청산 (반대 신호 ${oppositeCount}개 ≥ ${threshold}): ${pos.symbol} @ $${price.toFixed(2)} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`;
+              if (!isPaperPos) {
+                let actualQty = pos.quantity;
+                try {
+                  const onEx = await exchangeService.getPositionAmount(pos.symbol, positionSide);
+                  if (onEx > 0) actualQty = onEx;
+                } catch { /* fall back to DB qty */ }
+                await exchangeService.placeOrder(pos.symbol, isLong ? "sell" : "buy", "market", actualQty, undefined, { positionSide, reduceOnly: true });
+              }
+              await db.insert(tradeHistoryTable).values({ symbol: pos.symbol, side: isLong ? "sell" : "buy", price, quantity: pos.quantity, total: price * pos.quantity, fee: price * pos.quantity * 0.001, pnl, triggeredBy: isPaperPos ? "paper" : "bot" });
+              await db.insert(tradeReflectionsTable).values({ symbol: pos.symbol, timeframe: cfg.timeframe, side: pos.side, entryPrice: pos.entryPrice, exitPrice: price, exitReason: "EARLY_EXIT", pnl, pnlPercent: pnlPct, holdSeconds, originalConfidence: pos.aiConfidence, originalExpectedMovePercent: pos.expectedMovePercent, originalReasoning: pos.aiReasoning, bullishCount: div.bullishCount, bearishCount: div.bearishCount });
+              await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
+              await this.addLog("warning", earlyMsg, pos.symbol, isLong ? "SELL" : "BUY");
+              await this.maybeNotify("warning", `⚡ ${earlyMsg}`, cfg, `early-exit-${pos.symbol}-${pos.id}`);
+              notifyExit({ symbol: pos.symbol, side: pos.side, exitReason: "SL", entryPrice: pos.entryPrice, exitPrice: price, pnl, pnlPercent: pnlPct, holdMinutes: Math.floor(holdSeconds / 60), isPaper: isPaperPos }).catch(() => {});
+              return;
+            }
+          }
+        } catch (err) {
+          logger.warn({ err, symbol: pos.symbol }, "조기 청산 다이버전스 체크 실패 — 스킵");
+        }
+      }
+
       const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
       if (!tpHit && !slHit) return;
