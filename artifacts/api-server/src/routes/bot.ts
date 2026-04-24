@@ -1,10 +1,63 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { botConfigTable, botLogsTable, tradeHistoryTable, tradeReflectionsTable } from "@workspace/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { botManager } from "../lib/botManager";
 
 const router = Router();
+
+// ─────────────────────────────────────────────────────
+// 유효성 검증 헬퍼
+// ─────────────────────────────────────────────────────
+
+function parseLimit(raw: unknown, defaultVal: number, maxVal: number): number {
+  const n = parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(n) || n <= 0) return defaultVal;
+  return Math.min(n, maxVal);
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function toFiniteNumber(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function setIfValidNumber(
+  target: Record<string, unknown>,
+  key: string,
+  raw: unknown,
+  opts: { min?: number; max?: number; integer?: boolean } = {}
+) {
+  const n = toFiniteNumber(raw);
+  if (n === null) return;
+  if (opts.min !== undefined && n < opts.min) return;
+  if (opts.max !== undefined && n > opts.max) return;
+  target[key] = opts.integer ? Math.floor(n) : n;
+}
+
+function setIfValidString(
+  target: Record<string, unknown>,
+  key: string,
+  raw: unknown,
+  allowed?: string[]
+) {
+  if (!isNonEmptyString(raw)) return;
+  const val = raw.trim();
+  if (allowed && !allowed.includes(val)) return;
+  target[key] = val;
+}
+
+const ALLOWED_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d"];
+const ALLOWED_ENTRY_MODES = ["fixed", "full"];
+const ALLOWED_MARGIN_TYPES = ["ISOLATED", "CROSSED"];
+
+// ─────────────────────────────────────────────────────
+// Routes
+// ─────────────────────────────────────────────────────
 
 router.get("/status", async (_req, res) => {
   const status = botManager.getStatus();
@@ -37,7 +90,8 @@ router.get("/config", async (req, res) => {
     const rows = await db.select().from(botConfigTable).limit(1);
     if (rows.length === 0) {
       const [created] = await db.insert(botConfigTable).values({}).returning();
-      res.json(configToResponse(created)); return;
+      res.json(configToResponse(created));
+      return;
     }
     res.json(configToResponse(rows[0]));
   } catch (err) {
@@ -49,69 +103,90 @@ router.get("/config", async (req, res) => {
 router.put("/config", async (req, res) => {
   try {
     const rows = await db.select().from(botConfigTable).limit(1);
-    const body = req.body;
+    const body = req.body ?? {};
     const updateData: Record<string, unknown> = {};
-    if (body.symbol !== undefined) updateData.symbol = body.symbol;
+
+    // 문자열 필드 (엄격 검증)
+    setIfValidString(updateData, "symbol", body.symbol);
+    setIfValidString(updateData, "timeframe", body.timeframe, ALLOWED_TIMEFRAMES);
+    setIfValidString(updateData, "entryMode", body.entryMode, ALLOWED_ENTRY_MODES);
+    setIfValidString(updateData, "marginType", body.marginType?.toString().toUpperCase(), ALLOWED_MARGIN_TYPES);
+
+    // watchSymbols 배열
     if (body.watchSymbols !== undefined && Array.isArray(body.watchSymbols)) {
       const cleaned = (body.watchSymbols as unknown[])
-        .filter((s): s is string => typeof s === "string" && s.length > 0);
+        .filter((s): s is string => isNonEmptyString(s))
+        .map((s) => s.trim());
       const unique = Array.from(new Set(cleaned));
-      updateData.watchSymbols = unique.length > 0 ? unique : [body.symbol ?? "BTC/USDT"];
+      if (unique.length > 0) {
+        updateData.watchSymbols = unique;
+      } else {
+        // ✅ fallback: body.symbol → 기존 DB symbol → 기본값
+        const fallback =
+          (isNonEmptyString(body.symbol) && body.symbol.trim()) ||
+          (rows.length > 0 ? rows[0].symbol : "BTC/USDT");
+        updateData.watchSymbols = [fallback];
+      }
     }
-    if (body.timeframe !== undefined) updateData.timeframe = body.timeframe;
-    if (body.tradeAmount !== undefined) updateData.tradeAmount = body.tradeAmount;
-    if (body.maxPositions !== undefined) updateData.maxPositions = body.maxPositions;
-    if (body.stopLossPercent !== undefined) updateData.stopLossPercent = body.stopLossPercent;
-    if (body.takeProfitPercent !== undefined) updateData.takeProfitPercent = body.takeProfitPercent;
-    if (body.minConfidence !== undefined) updateData.minConfidence = body.minConfidence;
-    if (body.enabledIndicators !== undefined) updateData.enabledIndicators = body.enabledIndicators;
-    if (body.autoTrade !== undefined) updateData.autoTrade = body.autoTrade;
-    if (body.useAiTargets !== undefined) updateData.useAiTargets = body.useAiTargets;
-    if (body.checkIntervalSeconds !== undefined) updateData.checkIntervalSeconds = body.checkIntervalSeconds;
-    if (body.maxDailyLossPercent !== undefined) updateData.maxDailyLossPercent = body.maxDailyLossPercent;
-    if (body.useMtfFilter !== undefined) updateData.useMtfFilter = body.useMtfFilter;
-    if (body.strictMtf !== undefined) updateData.strictMtf = body.strictMtf;
+
+    // mtfTimeframes 배열
     if (body.mtfTimeframes !== undefined && Array.isArray(body.mtfTimeframes)) {
       const cleaned = (body.mtfTimeframes as unknown[])
-        .filter((t): t is string => typeof t === "string" && t.length > 0);
+        .filter((t): t is string => isNonEmptyString(t))
+        .map((t) => t.trim())
+        .filter((t) => ALLOWED_TIMEFRAMES.includes(t));
       updateData.mtfTimeframes = Array.from(new Set(cleaned));
     }
-    if (body.useFundingRate !== undefined) updateData.useFundingRate = body.useFundingRate;
+
+    // enabledIndicators 배열
+    if (body.enabledIndicators !== undefined && Array.isArray(body.enabledIndicators)) {
+      const cleaned = (body.enabledIndicators as unknown[])
+        .filter((s): s is string => isNonEmptyString(s))
+        .map((s) => s.trim());
+      updateData.enabledIndicators = Array.from(new Set(cleaned));
+    }
+
+    // 숫자 필드 (범위 검증 포함)
+    setIfValidNumber(updateData, "tradeAmount", body.tradeAmount, { min: 0 });
+    setIfValidNumber(updateData, "maxPositions", body.maxPositions, { min: 1, max: 100, integer: true });
+    setIfValidNumber(updateData, "stopLossPercent", body.stopLossPercent, { min: 0, max: 100 });
+    setIfValidNumber(updateData, "takeProfitPercent", body.takeProfitPercent, { min: 0, max: 100 });
+    setIfValidNumber(updateData, "minConfidence", body.minConfidence, { min: 0, max: 1 });
+    setIfValidNumber(updateData, "checkIntervalSeconds", body.checkIntervalSeconds, { min: 5, max: 3600, integer: true });
+    setIfValidNumber(updateData, "maxDailyLossPercent", body.maxDailyLossPercent, { min: 0, max: 100 });
+    setIfValidNumber(updateData, "leverage", body.leverage, { min: 1, max: 125, integer: true });
+    setIfValidNumber(updateData, "trailingActivatePercent", body.trailingActivatePercent, { min: 0.01, max: 50 });
+    setIfValidNumber(updateData, "trailingDistancePercent", body.trailingDistancePercent, { min: 0.01, max: 50 });
+    setIfValidNumber(updateData, "partialTpPercent", body.partialTpPercent, { min: 10, max: 90 });
+
+    // Boolean 필드
+    if (body.autoTrade !== undefined) updateData.autoTrade = Boolean(body.autoTrade);
+    if (body.useAiTargets !== undefined) updateData.useAiTargets = Boolean(body.useAiTargets);
+    if (body.useMtfFilter !== undefined) updateData.useMtfFilter = Boolean(body.useMtfFilter);
+    if (body.strictMtf !== undefined) updateData.strictMtf = Boolean(body.strictMtf);
+    if (body.useFundingRate !== undefined) updateData.useFundingRate = Boolean(body.useFundingRate);
+    if (body.notifyOnError !== undefined) updateData.notifyOnError = Boolean(body.notifyOnError);
+    if (body.useTrailingStop !== undefined) updateData.useTrailingStop = Boolean(body.useTrailingStop);
+    if (body.usePartialTp !== undefined) updateData.usePartialTp = Boolean(body.usePartialTp);
+    if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
+
+    // symbolOverrides 객체
     if (body.symbolOverrides !== undefined && body.symbolOverrides && typeof body.symbolOverrides === "object") {
       updateData.symbolOverrides = sanitizeSymbolOverrides(body.symbolOverrides as Record<string, unknown>);
     }
-    if (body.leverage !== undefined) {
-      const lev = Number(body.leverage);
-      if (Number.isFinite(lev) && lev >= 1 && lev <= 125) updateData.leverage = Math.floor(lev);
-    }
-    if (body.marginType !== undefined) {
-      const mt = String(body.marginType).toUpperCase();
-      if (mt === "ISOLATED" || mt === "CROSSED") updateData.marginType = mt;
-    }
-    if (body.notifyOnError !== undefined) updateData.notifyOnError = Boolean(body.notifyOnError);
-    if (body.useTrailingStop !== undefined) updateData.useTrailingStop = Boolean(body.useTrailingStop);
-    if (body.trailingActivatePercent !== undefined) {
-      const v = Number(body.trailingActivatePercent);
-      if (Number.isFinite(v) && v > 0 && v <= 50) updateData.trailingActivatePercent = v;
-    }
-    if (body.trailingDistancePercent !== undefined) {
-      const v = Number(body.trailingDistancePercent);
-      if (Number.isFinite(v) && v > 0 && v <= 50) updateData.trailingDistancePercent = v;
-    }
-    if (body.usePartialTp !== undefined) updateData.usePartialTp = Boolean(body.usePartialTp);
-    if (body.partialTpPercent !== undefined) {
-      const v = Number(body.partialTpPercent);
-      if (Number.isFinite(v) && v >= 10 && v <= 90) updateData.partialTpPercent = v;
-    }
-    if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
-    if (body.entryMode !== undefined) updateData.entryMode = body.entryMode;
+
     updateData.updatedAt = new Date();
 
     let updated;
     if (rows.length === 0) {
       [updated] = await db.insert(botConfigTable).values(updateData).returning();
     } else {
-      [updated] = await db.update(botConfigTable).set(updateData).returning();
+      // ✅ 수정 1: where 절 추가 — 특정 행만 업데이트
+      [updated] = await db
+        .update(botConfigTable)
+        .set(updateData)
+        .where(eq(botConfigTable.id, rows[0].id))
+        .returning();
     }
 
     await botManager.reloadConfig();
@@ -124,7 +199,7 @@ router.put("/config", async (req, res) => {
 });
 
 router.get("/logs", async (req, res) => {
-  const limit = Math.min(parseInt((req.query.limit as string) || "50", 10), 100);
+  const limit = parseLimit(req.query.limit, 50, 100);
   try {
     const logs = await db.select().from(botLogsTable).orderBy(desc(botLogsTable.createdAt)).limit(limit);
     res.json({
@@ -144,7 +219,7 @@ router.get("/logs", async (req, res) => {
 });
 
 router.get("/reflections", async (req, res) => {
-  const limit = Math.min(parseInt((req.query.limit as string) || "20", 10), 100);
+  const limit = parseLimit(req.query.limit, 20, 100);
   try {
     const rows = await db.select().from(tradeReflectionsTable).orderBy(desc(tradeReflectionsTable.createdAt)).limit(limit);
     res.json({
@@ -177,16 +252,23 @@ router.get("/reflections", async (req, res) => {
 function sanitizeSymbolOverrides(input: Record<string, unknown>): Record<string, Record<string, number>> {
   const out: Record<string, Record<string, number>> = {};
   const numericKeys = ["tradeAmount", "minConfidence", "takeProfitPercent", "stopLossPercent"] as const;
+  const ranges: Record<typeof numericKeys[number], { min: number; max: number }> = {
+    tradeAmount: { min: 0, max: Number.POSITIVE_INFINITY },
+    minConfidence: { min: 0, max: 1 },
+    takeProfitPercent: { min: 0, max: 100 },
+    stopLossPercent: { min: 0, max: 100 },
+  };
   for (const [sym, raw] of Object.entries(input)) {
-    if (!sym || typeof sym !== "string") continue;
+    if (!isNonEmptyString(sym)) continue;
     if (!raw || typeof raw !== "object") continue;
     const entry: Record<string, number> = {};
     const r = raw as Record<string, unknown>;
     for (const k of numericKeys) {
-      const v = r[k];
-      if (v === null || v === undefined || v === "") continue;
-      const n = typeof v === "number" ? v : Number(v);
-      if (Number.isFinite(n)) entry[k] = n;
+      const n = toFiniteNumber(r[k]);
+      if (n === null) continue;
+      const { min, max } = ranges[k];
+      if (n < min || n > max) continue;
+      entry[k] = n;
     }
     if (Object.keys(entry).length > 0) out[sym] = entry;
   }
