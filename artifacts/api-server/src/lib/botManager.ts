@@ -36,6 +36,12 @@ interface AiDecision {
   suggestedEntryPrice: number;
   suggestedTakeProfit: number | null;
   suggestedStopLoss: number | null;
+  // AI 확장 필드
+  suggestedPositionSizeMultiplier?: number | null; // tradeAmount × 이 값
+  suggestedLeverage?: number | null;               // 1 ~ aiLeverageMax
+  suggestedNewTakeProfit?: number | null;          // 동적 TP 조정용
+  skipReason?: string | null;                      // 심볼 거래 금지 사유
+  configSuggestions?: Record<string, number> | null; // 자가 수정 제안
 }
 
 type BotConfigRow = typeof botConfigTable.$inferSelect;
@@ -430,9 +436,44 @@ class BotManager {
       if (!aligned) { await this.addLog("info", `${symbol} MTF 불일치로 진입 차단 — ${conflicts.join(", ")} (15m=${divergence.overallBias})`, symbol); return; }
     }
     const atrPercent = computeAtrPercent(candles, 14);
-    const rawDecision = await this.getAiDecision({ symbol, timeframe: config.timeframe, currentPrice: ticker.price, change24h: ticker.changePercent24h, atrPercent, divergence, mtf, fundingRate, openInterest });
+    const rawDecision = await this.getAiDecision({
+      symbol, timeframe: config.timeframe, currentPrice: ticker.price,
+      change24h: ticker.changePercent24h, atrPercent, divergence, mtf, fundingRate, openInterest,
+      withPositionSize: config.useAiPositionSize ?? false,
+      positionSizeMin: config.aiPositionSizeMin ?? 0.3,
+      positionSizeMax: config.aiPositionSizeMax ?? 1.5,
+      withLeverage: config.useAiLeverage ?? false,
+      leverageMin: config.aiLeverageMin ?? 1,
+      leverageMax: config.aiLeverageMax ?? 10,
+      withSymbolBlock: config.useAiSymbolBlock ?? false,
+      withAutoTune: config.useAiAutoTune ?? false,
+    });
     const decision = this.sanitizeDecision(rawDecision, ticker.price, atrPercent);
     this.lastSignal = decision.action;
+
+    // ── 심볼 거래 금지 AI 판단 ─────────────────────────────────────────────────
+    if (config.useAiSymbolBlock && decision.skipReason) {
+      await this.addLog("info", `${symbol} 거래 금지 (AI 판단): ${decision.skipReason}`, symbol);
+      return;
+    }
+
+    // ── 복기 기반 설정 자가 수정 ──────────────────────────────────────────────
+    if (config.useAiAutoTune && decision.configSuggestions) {
+      const s = decision.configSuggestions;
+      const updateData: Record<string, unknown> = {};
+      if (typeof s.minConfidence === "number" && s.minConfidence > 0 && s.minConfidence < 1) updateData.minConfidence = s.minConfidence;
+      if (typeof s.stopLossPercent === "number" && s.stopLossPercent > 0) updateData.stopLossPercent = s.stopLossPercent;
+      if (typeof s.takeProfitPercent === "number" && s.takeProfitPercent > 0) updateData.takeProfitPercent = s.takeProfitPercent;
+      if (Object.keys(updateData).length > 0) {
+        try {
+          await db.update(botConfigTable).set(updateData).where(eq(botConfigTable.id, (await this.getConfig()).id));
+          this.cachedConfig = null;
+          await this.addLog("info", `🔧 AI 자가 수정 적용: ${JSON.stringify(updateData)}`, symbol);
+        } catch (err) {
+          logger.warn({ err }, "AI 자가 수정 실패");
+        }
+      }
+    }
     if (decision.action === "HOLD") {
       await this.addLog("info", `${symbol} @ $${ticker.price.toFixed(2)} — AI 관망 (강세 ${divergence.bullishCount} / 약세 ${divergence.bearishCount}) | ${decision.reasoning}`, symbol);
       return;
@@ -458,6 +499,25 @@ class BotManager {
     if (decision.confidence < params.minConfidence) { await this.addLog("info", `${symbol} 진입 스킵 — 신뢰도 부족 (${(decision.confidence * 100).toFixed(0)}% < 최소 ${(params.minConfidence * 100).toFixed(0)}%)`, symbol); return; }
     if (this.halted) { await this.addLog("warning", `${symbol} 진입 스킵 — 일일 손실 한도 도달 상태`, symbol); return; }
 
+    // ── 멀티 AI 합의제 ─────────────────────────────────────────────────────────
+    if (config.useMultiAiConsensus) {
+      try {
+        const challenger = await this.getAiDecision({
+          symbol, timeframe: config.timeframe, currentPrice: ticker.price,
+          change24h: ticker.changePercent24h, atrPercent, divergence, mtf, fundingRate, openInterest,
+        });
+        const challengerSanitized = this.sanitizeDecision(challenger, ticker.price, atrPercent);
+        if (challengerSanitized.action !== decision.action) {
+          await this.addLog("info",
+            `${symbol} 멀티 AI 불일치 — 1차: ${decision.action}, 2차: ${challengerSanitized.action} → 진입 스킵`, symbol);
+          return;
+        }
+        await this.addLog("info", `${symbol} 멀티 AI 합의 ✓ (${decision.action})`, symbol);
+      } catch (err) {
+        logger.warn({ err }, "멀티 AI 합의 호출 실패 — 1차 판단으로 진행");
+      }
+    }
+
     // ✅ Fix #4: maxPositions 제한 적용 — 현재 열린 포지션 수가 한도 초과 시 진입 차단
     {
       const allPositions = await db.select().from(activePositionsTable);
@@ -472,6 +532,24 @@ class BotManager {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
       const isPaper = config.paperTrading ?? true;
+
+      // ── AI 포지션 사이즈 결정 ──────────────────────────────────────────────
+      if (config.useAiPositionSize && decision.suggestedPositionSizeMultiplier != null) {
+        const mult = decision.suggestedPositionSizeMultiplier;
+        const original = params.tradeAmount;
+        params = { ...params, tradeAmount: Math.round(original * mult * 100) / 100 };
+        await this.addLog("info",
+          `${symbol} AI 포지션 사이즈: $${original.toFixed(0)} × ${mult.toFixed(2)} = $${params.tradeAmount.toFixed(0)} (${decision.riskLevel})`, symbol);
+      }
+
+      // ── AI 레버리지 결정 ───────────────────────────────────────────────────
+      const effectiveLeverage = (config.useAiLeverage && decision.suggestedLeverage != null)
+        ? decision.suggestedLeverage
+        : (config.leverage ?? 10);
+      if (config.useAiLeverage && decision.suggestedLeverage != null) {
+        await this.addLog("info",
+          `${symbol} AI 레버리지: ${decision.suggestedLeverage}× (ATR ${atrPercent?.toFixed(2) ?? "?"}%)`, symbol);
+      }
 
       if (!isPaper && (config.entryMode ?? "fixed") === "full") {
         try {
@@ -497,19 +575,6 @@ class BotManager {
       } else {
         takeProfit = entryPrice * (1 + dir * params.takeProfitPercent / 100);
         stopLoss = entryPrice * (1 - dir * params.stopLossPercent / 100);
-      }
-
-      // ── 저변동성 환경 TP 하향 조정 ────────────────────────────────────────
-      if (config.useLowVolTpReduction && atrPercent !== null) {
-        const atrThreshold = config.lowVolAtrThreshold ?? 0.5;
-        const tpMultiplier = config.lowVolTpMultiplier ?? 0.6;
-        if (atrPercent < atrThreshold) {
-          const originalTp = takeProfit;
-          // TP를 진입가 기준으로 multiplier 비율만큼 축소
-          const tpDistance = Math.abs(takeProfit - entryPrice) * tpMultiplier;
-          takeProfit = entryPrice + dir * tpDistance;
-          await this.addLog("info", `${symbol} 저변동성 감지 (ATR ${atrPercent.toFixed(2)}% < ${atrThreshold}%) — TP 하향 조정 $${originalTp.toFixed(2)} → $${takeProfit.toFixed(2)} (×${tpMultiplier})`, symbol);
-        }
       }
 
       // ✅ 수정 1+2: positionInserted 선언 추가, quantity 중복 선언 분리
@@ -543,16 +608,15 @@ class BotManager {
       }
 
       try {
-        const leverage = config.leverage ?? 10;
-        const notional = params.tradeAmount * leverage;
-        // ✅ 수정 2: 레버리지 적용 수량은 별도 변수명 사용
+        const notional = params.tradeAmount * effectiveLeverage;
+        // ✅ 레버리지 적용 수량 (AI 결정 or 설정값)
         const leveragedQuantity = notional / entryPrice;
         const positionSide = side === "long" ? "LONG" : "SHORT";
         let exchangeOrderId: string | undefined;
         if (isPaper) {
           await db.update(activePositionsTable).set({ quantity: leveragedQuantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         } else {
-          const order = await exchangeService.placeOrder(symbol, decision.action.toLowerCase(), "market", leveragedQuantity, undefined, { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" });
+          const order = await exchangeService.placeOrder(symbol, decision.action.toLowerCase(), "market", leveragedQuantity, undefined, { positionSide, leverage: effectiveLeverage, marginType: config.marginType ?? "ISOLATED" });
           exchangeOrderId = order.id;
           await db.update(activePositionsTable).set({ quantity: leveragedQuantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         }
@@ -654,6 +718,46 @@ class BotManager {
           }
         }
       }
+
+      // ── AI 동적 TP 조정 ────────────────────────────────────────────────────
+      // 매 positionTick마다 현재 시장 상황 재분석 → TP가 너무 멀거나 가까우면 조정
+      // 부분 익절이 완료됐거나 이미 TP에 매우 근접한 경우는 스킵
+      if (cfg.useAiDynamicTp) {
+        const distToTp = Math.abs(pos.takeProfit - price) / price;
+        const alreadyClose = distToTp < 0.002; // TP까지 0.2% 미만이면 스킵
+        if (!alreadyClose) {
+          try {
+            const candles = await exchangeService.getOhlcv(pos.symbol, cfg.timeframe, 100);
+            if (candles.length >= 50) {
+              const divergence = analyzeDivergences(candles, pos.symbol, cfg.timeframe);
+              const atrPct = computeAtrPercent(candles, 14);
+              const dynDecision = await this.getAiDecision({
+                symbol: pos.symbol, timeframe: cfg.timeframe,
+                currentPrice: price, change24h: 0,
+                atrPercent: atrPct, divergence,
+                mtf: {}, fundingRate: null, openInterest: null,
+              });
+              const sanitized = this.sanitizeDecision(dynDecision, price, atrPct);
+              // 포지션 방향과 같은 신호일 때만 TP 업데이트
+              const sameDir = (isLong && sanitized.action === "BUY") || (!isLong && sanitized.action === "SELL");
+              if (sameDir && sanitized.suggestedTakeProfit !== null) {
+                const newTp = sanitized.suggestedTakeProfit;
+                const tpImproved = isLong ? newTp > pos.takeProfit : newTp < pos.takeProfit;
+                const tpNotTooFar = Math.abs(newTp - price) / price < 0.08; // 8% 이내만 허용
+                if (tpImproved && tpNotTooFar) {
+                  await db.update(activePositionsTable).set({ takeProfit: newTp }).where(eq(activePositionsTable.id, pos.id));
+                  await this.addLog("info",
+                    `${pos.symbol} AI TP 동적 조정: $${pos.takeProfit.toFixed(4)} → $${newTp.toFixed(4)}`, pos.symbol);
+                  pos.takeProfit = newTp;
+                }
+              }
+            }
+          } catch (err) {
+            logger.warn({ err, symbol: pos.symbol }, "AI 동적 TP 조정 실패 — 스킵");
+          }
+        }
+      }
+
       if (cfg.usePartialTp && !pos.partialTpDone) {
         const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
         if (tpHit) {
@@ -683,45 +787,6 @@ class BotManager {
           }
         }
       }
-      // ── 반대 신호 조기 청산 ────────────────────────────────────────────────
-      if (cfg.useEarlyExitOnOpposite) {
-        const threshold = cfg.earlyExitOppositeCount ?? 3;
-        try {
-          const candles = await exchangeService.getOhlcv(pos.symbol, cfg.timeframe, 200);
-          if (candles.length >= 50) {
-            const div = analyzeDivergences(candles, pos.symbol, cfg.timeframe);
-            const oppositeCount = isLong ? div.bearishCount : div.bullishCount;
-            if (oppositeCount >= threshold) {
-              const isPaperPos = pos.triggeredBy === "paper";
-              const positionSide = isLong ? "LONG" : "SHORT";
-              const pnl = (price - pos.entryPrice) * pos.quantity * (isLong ? 1 : -1);
-              const leverage = cfg.leverage ?? 10;
-              const rawPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
-              const pnlPct = rawPct * leverage;
-              const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
-              const earlyMsg = `${isPaperPos ? "[가상] " : ""}조기 청산 (반대 신호 ${oppositeCount}개 ≥ ${threshold}): ${pos.symbol} @ $${price.toFixed(2)} | P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%)`;
-              if (!isPaperPos) {
-                let actualQty = pos.quantity;
-                try {
-                  const onEx = await exchangeService.getPositionAmount(pos.symbol, positionSide);
-                  if (onEx > 0) actualQty = onEx;
-                } catch { /* fall back to DB qty */ }
-                await exchangeService.placeOrder(pos.symbol, isLong ? "sell" : "buy", "market", actualQty, undefined, { positionSide, reduceOnly: true });
-              }
-              await db.insert(tradeHistoryTable).values({ symbol: pos.symbol, side: isLong ? "sell" : "buy", price, quantity: pos.quantity, total: price * pos.quantity, fee: price * pos.quantity * 0.001, pnl, triggeredBy: isPaperPos ? "paper" : "bot" });
-              await db.insert(tradeReflectionsTable).values({ symbol: pos.symbol, timeframe: cfg.timeframe, side: pos.side, entryPrice: pos.entryPrice, exitPrice: price, exitReason: "EARLY_EXIT", pnl, pnlPercent: pnlPct, holdSeconds, originalConfidence: pos.aiConfidence, originalExpectedMovePercent: pos.expectedMovePercent, originalReasoning: pos.aiReasoning, bullishCount: div.bullishCount, bearishCount: div.bearishCount });
-              await db.delete(activePositionsTable).where(eq(activePositionsTable.id, pos.id));
-              await this.addLog("warning", earlyMsg, pos.symbol, isLong ? "SELL" : "BUY");
-              await this.maybeNotify("warning", `⚡ ${earlyMsg}`, cfg, `early-exit-${pos.symbol}-${pos.id}`);
-              notifyExit({ symbol: pos.symbol, side: pos.side, exitReason: "SL", entryPrice: pos.entryPrice, exitPrice: price, pnl, pnlPercent: pnlPct, holdMinutes: Math.floor(holdSeconds / 60), isPaper: isPaperPos }).catch(() => {});
-              return;
-            }
-          }
-        } catch (err) {
-          logger.warn({ err, symbol: pos.symbol }, "조기 청산 다이버전스 체크 실패 — 스킵");
-        }
-      }
-
       const tpHit = isLong ? price >= pos.takeProfit : price <= pos.takeProfit;
       const slHit = isLong ? price <= pos.stopLoss : price >= pos.stopLoss;
       if (!tpHit && !slHit) return;
@@ -856,8 +921,27 @@ class BotManager {
     symbol: string; timeframe: string; currentPrice: number; change24h: number;
     atrPercent: number | null; divergence: ReturnType<typeof analyzeDivergences>;
     mtf: Record<string, string>; fundingRate: number | null; openInterest: number | null;
+    // 확장 옵션
+    withPositionSize?: boolean; positionSizeMin?: number; positionSizeMax?: number;
+    withLeverage?: boolean; leverageMin?: number; leverageMax?: number;
+    withSymbolBlock?: boolean;
+    withAutoTune?: boolean; recentReflectionSummary?: string;
   }): Promise<AiDecision> {
-    const { symbol, timeframe, currentPrice, change24h, atrPercent, divergence, mtf, fundingRate, openInterest } = input;
+    const {
+      symbol, timeframe, currentPrice, change24h, atrPercent, divergence, mtf, fundingRate, openInterest,
+      withPositionSize, positionSizeMin = 0.3, positionSizeMax = 1.5,
+      withLeverage, leverageMin = 1, leverageMax = 10,
+      withSymbolBlock, withAutoTune,
+    } = input;
+
+    // 확장 JSON 필드 설명
+    const extraFields = [
+      withPositionSize ? `  "suggestedPositionSizeMultiplier": number (${positionSizeMin}–${positionSizeMax}), // tradeAmount 배수. riskLevel/confidence 기반으로 결정. low risk+high confidence → 1.2~1.5, high risk → 0.3~0.6` : null,
+      withLeverage ? `  "suggestedLeverage": integer (${leverageMin}–${leverageMax}), // ATR 높으면 낮게, 낮으면 높게. high riskLevel → min 쪽으로` : null,
+      withSymbolBlock ? `  "skipReason": string|null, // null이면 정상 거래, 문자열이면 이 심볼 이번 tick 거래 금지 사유 (한국어)` : null,
+      withAutoTune ? `  "configSuggestions": {"minConfidence": number, "stopLossPercent": number, "takeProfitPercent": number}|null // 복기 분석 후 설정 조정 제안. 변경 불필요하면 null` : null,
+    ].filter(Boolean).join("\n");
+
     const systemPrompt = `You are an expert crypto trading bot specialized in divergence-based scalping on the ${timeframe} timeframe.
 Use multi-indicator divergence signals (MACD, RSI, Stoch, CCI, MOM, OBV), multi-timeframe (MTF) bias, funding rate sentiment, and recent ATR volatility to predict the next ~10–20 candle price move.
 
@@ -883,7 +967,7 @@ Respond ONLY with valid JSON (no markdown, no prose):
   "expectedMovePercent": signed number,
   "suggestedEntryPrice": number,
   "suggestedTakeProfit": number,
-  "suggestedStopLoss": number
+  "suggestedStopLoss": number${extraFields ? ",\n" + extraFields : ""}
 }`;
     const sigList = divergence.signals.map(s => `${s.indicator}/${s.type}@${s.strength.toFixed(2)}`).join(", ") || "none";
     const mtfText = Object.keys(mtf).length > 0 ? Object.entries(mtf).map(([tf, b]) => `  - ${tf}: ${b}`).join("\n") : "  (disabled)";
@@ -939,7 +1023,24 @@ Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.
       takeProfit = entryPrice * (1 + dir * moveAbs);
       stopLoss = entryPrice * (1 - dir * moveAbs * 0.5);
     }
-    return { action, confidence, reasoning: parsed.reasoning || "분석 결과가 제공되지 않았습니다.", riskLevel: (parsed.riskLevel as "low" | "medium" | "high") || "medium", expectedMovePercent, suggestedEntryPrice: entryPrice, suggestedTakeProfit: takeProfit, suggestedStopLoss: stopLoss };
+    return {
+      action, confidence,
+      reasoning: parsed.reasoning || "분석 결과가 제공되지 않았습니다.",
+      riskLevel: (parsed.riskLevel as "low" | "medium" | "high") || "medium",
+      expectedMovePercent, suggestedEntryPrice: entryPrice,
+      suggestedTakeProfit: takeProfit, suggestedStopLoss: stopLoss,
+      // 확장 필드 파싱
+      suggestedPositionSizeMultiplier: withPositionSize && Number.isFinite(parsed.suggestedPositionSizeMultiplier)
+        ? Math.min(positionSizeMax, Math.max(positionSizeMin, Number(parsed.suggestedPositionSizeMultiplier)))
+        : null,
+      suggestedLeverage: withLeverage && Number.isInteger(parsed.suggestedLeverage)
+        ? Math.min(leverageMax, Math.max(leverageMin, Math.floor(Number(parsed.suggestedLeverage))))
+        : null,
+      skipReason: withSymbolBlock && typeof parsed.skipReason === "string" && parsed.skipReason.length > 0
+        ? parsed.skipReason : null,
+      configSuggestions: withAutoTune && parsed.configSuggestions && typeof parsed.configSuggestions === "object"
+        ? parsed.configSuggestions as Record<string, number> : null,
+    };
   }
 
   private async addLog(level: string, message: string, symbol?: string, action?: string) {
