@@ -442,6 +442,14 @@ class BotManager {
 
       // ✅ 트랜잭션 제거 — 직접 select 후 insert
       try {
+          const existing = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
+          if (existing.length > 0) {
+            await this.addLog("info", `${symbol} 이미 포지션 보유 중 (${side}) — 신규 진입 건너뜀`, symbol);
+            return;
+          }
+          const quantity = params.tradeAmount / entryPrice;
+          await db.insert(activePositionsTable).values({
+            symbol,
             side,
             entryPrice,
             quantity,
