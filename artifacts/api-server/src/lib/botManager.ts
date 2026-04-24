@@ -162,10 +162,13 @@ class BotManager {
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
-    if (this.intervalId) clearInterval(this.intervalId);
-    this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
-    if (this.positionIntervalId) clearInterval(this.positionIntervalId);
-    this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
+    // ✅ Fix #8: running 상태일 때만 인터벌 재설정 — 중지 상태에서 reloadConfig 호출 시 tick이 재시작되지 않도록
+    if (this.running) {
+      if (this.intervalId) clearInterval(this.intervalId);
+      this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
+      if (this.positionIntervalId) clearInterval(this.positionIntervalId);
+      this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
+    }
     await this.addLog("info", `봇 설정이 재로딩되었습니다.: [${this.currentSymbols.join(", ")}] ${config.timeframe}`);
   }
 
@@ -419,6 +422,16 @@ class BotManager {
     if (decision.confidence < params.minConfidence) { await this.addLog("info", `${symbol} 진입 스킵 — 신뢰도 부족 (${(decision.confidence * 100).toFixed(0)}% < 최소 ${(params.minConfidence * 100).toFixed(0)}%)`, symbol); return; }
     if (this.halted) { await this.addLog("warning", `${symbol} 진입 스킵 — 일일 손실 한도 도달 상태`, symbol); return; }
 
+    // ✅ Fix #4: maxPositions 제한 적용 — 현재 열린 포지션 수가 한도 초과 시 진입 차단
+    {
+      const allPositions = await db.select().from(activePositionsTable);
+      const maxPos = config.maxPositions ?? 1;
+      if (allPositions.length >= maxPos) {
+        await this.addLog("info", `${symbol} 진입 스킵 — 최대 포지션 수 도달 (현재 ${allPositions.length}/${maxPos})`, symbol);
+        return;
+      }
+    }
+
     {
       const dir = decision.action === "BUY" ? 1 : -1;
       const side = decision.action === "BUY" ? "long" : "short";
@@ -636,7 +649,11 @@ class BotManager {
         const leverage = cfg.leverage ?? 10;
         const closeQty = actualQty;
         const pnl = (price - pos.entryPrice) * closeQty * (isLong ? 1 : -1);
-        const pnlPct = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1) * leverage;
+        // ✅ Fix #3: pnlPercent는 가격 변동률 기반으로 계산 후 레버리지 적용.
+        // closeQty는 이미 레버리지 적용 수량이므로 pnl은 레버리지를 이미 반영함.
+        // pnlPercent도 실제 가격 변동 % × leverage 로 표시하되 quantity 기반으로 이중 적용하지 않음.
+        const rawPriceMovePercent = ((price - pos.entryPrice) / pos.entryPrice) * 100 * (isLong ? 1 : -1);
+        const pnlPct = rawPriceMovePercent * leverage;
         const holdSeconds = Math.max(0, Math.floor((Date.now() - pos.openedAt.getTime()) / 1000));
         await db.insert(tradeHistoryTable).values({ symbol: pos.symbol, side: isLong ? "sell" : "buy", price, quantity: closeQty, total: price * closeQty, fee: price * closeQty * 0.001, pnl, triggeredBy: isPaperPos ? "paper" : "bot" });
         let bullishCount = 0, bearishCount = 0, originalConfidence: number | null = pos.aiConfidence;

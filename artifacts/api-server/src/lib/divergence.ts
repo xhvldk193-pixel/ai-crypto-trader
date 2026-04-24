@@ -217,8 +217,8 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
 
   const allSignals: DivergenceSignal[] = [];
   for (const ind of indicators) {
-    const indLows = findPivotLows(ind.data);
-    const indHighs = findPivotHighs(ind.data);
+    // ✅ Fix #5: indLows/indHighs는 detectDivergences에서 사용되지 않는 데드 코드였음 — 제거
+    // detectDivergences는 indicatorData 배열과 priceLows/priceHighs의 인덱스로 직접 비교함
     const divs = detectDivergences(priceLows, priceHighs, ind.data, ind.name);
     allSignals.push(...divs);
   }
