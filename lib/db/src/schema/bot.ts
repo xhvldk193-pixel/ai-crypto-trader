@@ -40,14 +40,28 @@ export const botConfigTable = pgTable("bot_config", {
   entryMode: text("entry_mode").notNull().default("fixed"),
   paperTrading: boolean("paper_trading").notNull().default(true),
   // ── 반대 신호 조기 청산 ──────────────────────────────────────────────────────
-  // 보유 중 포지션 방향과 반대인 다이버전스가 이 횟수 이상 발생하면 즉시 청산
   useEarlyExitOnOpposite: boolean("use_early_exit_on_opposite").notNull().default(false),
   earlyExitOppositeCount: integer("early_exit_opposite_count").notNull().default(3),
   // ── 저변동성 환경 TP 하향 조정 ───────────────────────────────────────────────
-  // ATR%가 이 임계값 미만이면 낮은 변동성으로 판단하여 TP를 비율만큼 축소
   useLowVolTpReduction: boolean("use_low_vol_tp_reduction").notNull().default(false),
-  lowVolAtrThreshold: real("low_vol_atr_threshold").notNull().default(0.5),   // ATR% 기준값
-  lowVolTpMultiplier: real("low_vol_tp_multiplier").notNull().default(0.6),   // TP × 0.6
+  lowVolAtrThreshold: real("low_vol_atr_threshold").notNull().default(0.5),
+  lowVolTpMultiplier: real("low_vol_tp_multiplier").notNull().default(0.6),
+  // ── AI 포지션 사이즈 결정 ─────────────────────────────────────────────────────
+  useAiPositionSize: boolean("use_ai_position_size").notNull().default(false),
+  aiPositionSizeMin: real("ai_position_size_min").notNull().default(0.3),  // tradeAmount × 0.3 ~ 1.5
+  aiPositionSizeMax: real("ai_position_size_max").notNull().default(1.5),
+  // ── AI 레버리지 결정 ──────────────────────────────────────────────────────────
+  useAiLeverage: boolean("use_ai_leverage").notNull().default(false),
+  aiLeverageMin: integer("ai_leverage_min").notNull().default(1),
+  aiLeverageMax: integer("ai_leverage_max").notNull().default(10),
+  // ── 멀티 AI 합의제 ────────────────────────────────────────────────────────────
+  useMultiAiConsensus: boolean("use_multi_ai_consensus").notNull().default(false),
+  // ── 보유 중 AI TP 동적 조정 ──────────────────────────────────────────────────
+  useAiDynamicTp: boolean("use_ai_dynamic_tp").notNull().default(false),
+  // ── 심볼 거래 금지 AI 판단 ────────────────────────────────────────────────────
+  useAiSymbolBlock: boolean("use_ai_symbol_block").notNull().default(false),
+  // ── 복기 기반 설정 자가 수정 ──────────────────────────────────────────────────
+  useAiAutoTune: boolean("use_ai_auto_tune").notNull().default(false),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
