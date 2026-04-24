@@ -42,9 +42,9 @@ async function fetchDeFiLlama(): Promise<{ stablecoinMarketCap: number | null }>
   try {
     const res = await fetch("https://stablecoins.llama.fi/stablecoins?includePrices=true");
     const json = await res.json();
-    const total = (json?.peggedAssets ?? []).reduce((sum: number, a: any) => {
-      return sum + (a?.circulating?.peggedUSD ?? 0);
-    }, 0);
+    type PeggedAsset = { circulating?: { peggedUSD?: number } };
+    const assets = (json?.peggedAssets ?? []) as PeggedAsset[];
+    const total = assets.reduce((sum, a) => sum + (a?.circulating?.peggedUSD ?? 0), 0);
     return { stablecoinMarketCap: total > 0 ? Number((total / 1e9).toFixed(2)) : null };
   } catch {
     return { stablecoinMarketCap: null };

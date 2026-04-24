@@ -69,27 +69,35 @@ async function ensureSymbolSetup(
   symbol: string,
   leverage: number,
   marginType: string,
+  holdSide: "long" | "short",
 ): Promise<void> {
   if (IS_DEMO) return;
-  const cached = configuredSymbols.get(symbol);
+  // ✅ 수정: 캐시 키에 holdSide 포함 — 같은 심볼이라도 롱/숏 각각 레버리지 설정 필요
+  const cacheKey = `${symbol}|${holdSide}`;
+  const cached = configuredSymbols.get(cacheKey);
   if (cached?.leverage === leverage && cached?.marginType === marginType) return;
 
   const swapSym = toSwapSymbol(symbol);
 
   try {
+    // Bitget 헤지 모드: setMarginMode는 holdSide 불필요 (심볼 단위)
     await ex.setMarginMode(marginType.toLowerCase(), swapSym);
   } catch (err) {
     logger.warn({ err: String(err), symbol }, "setMarginMode 실패 (이미 설정됐을 수 있음)");
   }
 
   try {
-    await ex.setLeverage(leverage, swapSym);
+    // ✅ 수정: Bitget 헤지 모드에서는 holdSide 파라미터가 필수
+    // (안 주면 양방향 모두 설정 시도하다 실패)
+    const setLevParams: Record<string, unknown> =
+      EXCHANGE_ID === "bitget" ? { holdSide } : {};
+    await ex.setLeverage(leverage, swapSym, setLevParams);
   } catch (err) {
-    logger.warn({ err: String(err), symbol, leverage }, "setLeverage 실패");
+    logger.warn({ err: String(err), symbol, leverage, holdSide }, "setLeverage 실패");
     throw err;
   }
 
-  configuredSymbols.set(symbol, { leverage, marginType });
+  configuredSymbols.set(cacheKey, { leverage, marginType });
 }
 
 // ─── Demo 상태 ───────────────────────────────────────────────────────────────
@@ -171,8 +179,13 @@ async function fetchOhlcvRange(
   const all: Candle[] = [];
   let since = startMs;
   const PAGE = 1000;
+  let prevSince = -1; // ✅ 수정: 진행 없음 감지용
 
   while (since < endMs && all.length < maxCandles) {
+    // ✅ 수정: since가 전 루프와 같으면 거래소가 더 이상 데이터를 제공하지 않는 것 → 중단
+    if (since === prevSince) break;
+    prevSince = since;
+
     const data = await ex.fetchOHLCV(swapSym, timeframe, since, PAGE);
     if (!data || data.length === 0) break;
     for (const k of data) {
@@ -252,10 +265,15 @@ export const exchangeService = {
 
   async getBalance() {
     if (IS_DEMO) {
-      const positionValue = demoPositions.reduce((s, p) => s + p.pnl, 0);
+      // ✅ 수정: 데모 모드에서 데모는 증거금을 실제로 차감하지 않으므로
+      // totalUsd = demoWallet + 미실현 손익 (pnl 합)
+      // free = demoWallet (실현된 자금만 가용으로 표시)
+      // 실거래 시 거래소가 직접 반환하는 값과 개념 일치
+      const unrealizedPnl = demoPositions.reduce((s, p) => s + p.pnl, 0);
+      const totalUsd = demoWallet + unrealizedPnl;
       return {
-        totalUsd: demoWallet + positionValue,
-        balances: [{ asset: "USDT", free: demoWallet, locked: 0, usdValue: demoWallet }],
+        totalUsd,
+        balances: [{ asset: "USDT", free: demoWallet, locked: 0, usdValue: totalUsd }],
       };
     }
     const data = await ex.fetchBalance({ type: 'swap' });
@@ -287,7 +305,9 @@ export const exchangeService = {
       .filter((p) => Math.abs(p.contracts ?? 0) > 0 || Math.abs(parseFloat(String(p.contractSize ?? "0"))) > 0)
       .map((p) => {
         const qty = Math.abs(p.contracts ?? parseFloat(String(p.contractSize ?? "0")));
-        const side = (p.side === "short") ? "short" : "long";
+        // ✅ 수정: side 정규화 — 소문자화 후 비교 (거래소가 "Long"/"LONG" 등 반환해도 대응)
+        const rawSide = String(p.side ?? "").toLowerCase();
+        const side: "long" | "short" = rawSide === "short" ? "short" : "long";
         const entry = p.entryPrice ?? 0;
         const mark = p.markPrice ?? p.lastPrice ?? entry;
         const pnl = p.unrealizedPnl ?? 0;
@@ -345,15 +365,28 @@ export const exchangeService = {
       (sideUpper === "SELL" && positionSide === "LONG") ||
       (sideUpper === "BUY" && positionSide === "SHORT");
 
+    const holdSide: "long" | "short" = positionSide === "LONG" ? "long" : "short";
+
     if (!isClosing && opts.leverage) {
-      await ensureSymbolSetup(symbol, opts.leverage, opts.marginType ?? "isolated");
+      await ensureSymbolSetup(symbol, opts.leverage, opts.marginType ?? "isolated", holdSide);
     }
 
-    const params: Record<string, unknown> = {
-  oneWayMode: false,
-  holdSide: positionSide.toLowerCase(), // 비트겟은 'long'/'short' 소문자
-};
-    if (opts.reduceOnly) params.reduceOnly = true;
+    const params: Record<string, unknown> = {};
+
+    if (EXCHANGE_ID === "bitget") {
+      // ✅ 수정: Bitget 헤지 모드 필수 파라미터
+      // - holdSide: 어느 쪽 포지션(long/short)에 대한 주문인지
+      // - tradeSide: "open" (진입) 또는 "close" (청산) — 이게 없으면 one-way 모드로 처리되어 거부됨
+      // - reduceOnly는 청산 시 추가 보험
+      params.holdSide = holdSide;
+      params.tradeSide = isClosing ? "close" : "open";
+      if (isClosing) params.reduceOnly = true;
+    } else {
+      // 바이낸스/바이비트 등 기타 거래소
+      if (opts.reduceOnly) params.reduceOnly = true;
+      params.positionSide = positionSide; // Binance hedge mode
+    }
+
     if (type === "limit" && price) params.price = price;
 
     const order = await ex.createOrder(
@@ -407,8 +440,8 @@ export const exchangeService = {
     return true;
   },
 
-  async ensureFuturesSetup(symbol: string, leverage: number, marginType: string) {
-    return ensureSymbolSetup(symbol, leverage, marginType);
+  async ensureFuturesSetup(symbol: string, leverage: number, marginType: string, holdSide: "long" | "short" = "long") {
+    return ensureSymbolSetup(symbol, leverage, marginType, holdSide);
   },
 
   async getPositionAmount(symbol: string, positionSide: PositionSide): Promise<number> {

@@ -10,9 +10,72 @@ const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set");
 }
+
+// ─────────────────────────────────────────────────────
+// 비밀번호 검증 — scrypt 해시 우선, 평문은 하위호환 경고
+// ─────────────────────────────────────────────────────
+//
+// OWNER_PASSWORD_HASH 형식: "scrypt$<N>$<r>$<p>$<saltHex>$<hashHex>"
+//   예: "scrypt$16384$8$1$<32바이트 salt hex>$<64바이트 hash hex>"
+//
+// 해시 생성: `node scripts/hash-password.mjs <비밀번호>` 로 생성해서
+// Railway/Replit Secrets 에 OWNER_PASSWORD_HASH 로 등록.
+//
+// 평문 OWNER_PASSWORD 는 기존 배포와의 호환을 위해 계속 지원하되
+// 서버 기동 시 경고를 찍는다. 가능하면 해시로 전환 권장.
+
+const OWNER_PASSWORD_HASH = process.env.OWNER_PASSWORD_HASH;
 const OWNER_PASSWORD = process.env.OWNER_PASSWORD;
-if (!OWNER_PASSWORD) {
-  throw new Error("OWNER_PASSWORD must be set to enable authentication");
+
+if (!OWNER_PASSWORD_HASH && !OWNER_PASSWORD) {
+  throw new Error(
+    "Either OWNER_PASSWORD_HASH (preferred) or OWNER_PASSWORD must be set to enable authentication",
+  );
+}
+if (!OWNER_PASSWORD_HASH && OWNER_PASSWORD) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "⚠️  OWNER_PASSWORD is set in plaintext. Generate a hash with scripts/hash-password.mjs " +
+    "and store it in OWNER_PASSWORD_HASH instead.",
+  );
+}
+
+interface ParsedScryptHash {
+  N: number;
+  r: number;
+  p: number;
+  salt: Buffer;
+  hash: Buffer;
+}
+
+function parseScryptHash(serialized: string): ParsedScryptHash | null {
+  const parts = serialized.split("$");
+  if (parts.length !== 6 || parts[0] !== "scrypt") return null;
+  const N = Number(parts[1]);
+  const r = Number(parts[2]);
+  const p = Number(parts[3]);
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)) return null;
+  try {
+    const salt = Buffer.from(parts[4], "hex");
+    const hash = Buffer.from(parts[5], "hex");
+    if (salt.length === 0 || hash.length === 0) return null;
+    return { N, r, p, salt, hash };
+  } catch {
+    return null;
+  }
+}
+
+function scryptVerify(submitted: string, serialized: string): boolean {
+  const parsed = parseScryptHash(serialized);
+  if (!parsed) return false;
+  const { N, r, p, salt, hash } = parsed;
+  try {
+    const derived = crypto.scryptSync(submitted, salt, hash.length, { N, r, p, maxmem: 128 * N * r * 2 });
+    if (derived.length !== hash.length) return false;
+    return crypto.timingSafeEqual(derived, hash);
+  } catch {
+    return false;
+  }
 }
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -94,14 +157,25 @@ export const sessionMiddleware: RequestHandler = session({
 
 export function verifyOwnerPassword(submitted: string): boolean {
   if (typeof submitted !== "string" || submitted.length === 0) return false;
-  const a = Buffer.from(submitted);
-  const b = Buffer.from(OWNER_PASSWORD!);
-  if (a.length !== b.length) {
-    // Still do a constant-time compare against same-length buffer to avoid leaking length differences
-    crypto.timingSafeEqual(a, Buffer.alloc(a.length));
-    return false;
+
+  // 1순위: scrypt 해시
+  if (OWNER_PASSWORD_HASH) {
+    return scryptVerify(submitted, OWNER_PASSWORD_HASH);
   }
-  return crypto.timingSafeEqual(a, b);
+
+  // 2순위: 평문 비교 (하위호환)
+  if (OWNER_PASSWORD) {
+    const a = Buffer.from(submitted);
+    const b = Buffer.from(OWNER_PASSWORD);
+    if (a.length !== b.length) {
+      // Still do a constant-time compare against same-length buffer to avoid leaking length differences
+      crypto.timingSafeEqual(a, Buffer.alloc(a.length));
+      return false;
+    }
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  return false;
 }
 
 export const requireAuth: RequestHandler = (req, res, next) => {

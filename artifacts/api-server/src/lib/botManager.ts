@@ -7,6 +7,7 @@ import { computeAtrPercent } from "./indicators";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
 import { notifyAlert, notifyEntry, notifyExit } from "./telegram";
+import { botEvents } from "./events";
 
 // ✅ 수정 5: 모델명 확인 — claude-haiku-4-5 는 올바른 API ID
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
@@ -112,6 +113,8 @@ class BotManager {
   private dailyResetDay: number = startOfTodayUtc().getTime();
 
   private cachedConfig: BotConfigRow | null = null;
+  private cachedConfigAt = 0;
+  private readonly CONFIG_CACHE_TTL_MS = 30 * 1000; // 30초 TTL — DB 부하 경감, 설정 변경 시 reloadConfig가 즉시 무효화
 
   getStatus(): BotStatus {
     return {
@@ -130,6 +133,24 @@ class BotManager {
     };
   }
 
+  // ✅ 추가: 상태 변화 시 SSE 구독자에게 스냅샷 푸시
+  private emitStatus(): void {
+    try {
+      botEvents.emitStatus({
+        running: this.running,
+        symbols: [...this.currentSymbols],
+        timeframe: this.currentTimeframe,
+        lastSignal: this.lastSignal,
+        lastCheckedAt: this.lastCheckedAt ?? undefined,
+        totalSignals: this.totalSignals,
+        executedTrades: this.executedTrades,
+        dailyPnlUsd: this.dailyPnlUsd,
+        dailyPnlPercent: this.dailyPnlPercent,
+        halted: this.halted,
+      });
+    } catch { /* best-effort */ }
+  }
+
   async start() {
     if (this.running) return;
     this.running = true;
@@ -145,6 +166,7 @@ class BotManager {
     this.currentTimeframe = config.timeframe;
     this.intervalId = setInterval(() => this.tick(), config.checkIntervalSeconds * 1000);
     this.positionIntervalId = setInterval(() => this.positionTick(), this.POSITION_CHECK_INTERVAL_MS);
+    this.emitStatus(); // ✅ SSE 구독자에게 running 상태 알림
     this.tick().catch((err) => logger.error({ err }, "Bot tick error"));
   }
 
@@ -154,11 +176,13 @@ class BotManager {
     this.startTime = null;
     if (this.intervalId) { clearInterval(this.intervalId); this.intervalId = null; }
     if (this.positionIntervalId) { clearInterval(this.positionIntervalId); this.positionIntervalId = null; }
+    this.emitStatus(); // ✅ SSE 구독자에게 stopped 상태 알림
     this.addLog("info", "트레이딩 봇이 중지되었습니다.").catch(() => {});
   }
 
   async reloadConfig() {
     this.cachedConfig = null;
+    this.cachedConfigAt = 0;
     const config = await this.getConfig();
     this.currentSymbols = this.resolveWatchSymbols(config);
     this.currentTimeframe = config.timeframe;
@@ -185,16 +209,21 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
-  // ✅ 수정 4: cachedConfig 활용 — DB 조회 최소화
+  // ✅ 수정 4: TTL 기반 캐시 — 30초 이내 재사용, 그 이후는 DB 재조회
   private async getConfig(): Promise<BotConfigRow> {
-    if (this.cachedConfig) return this.cachedConfig;
+    const now = Date.now();
+    if (this.cachedConfig && now - this.cachedConfigAt < this.CONFIG_CACHE_TTL_MS) {
+      return this.cachedConfig;
+    }
     const rows = await db.select().from(botConfigTable).limit(1);
     if (rows.length === 0) {
       const [created] = await db.insert(botConfigTable).values({}).returning();
       this.cachedConfig = created;
+      this.cachedConfigAt = now;
       return created;
     }
     this.cachedConfig = rows[0];
+    this.cachedConfigAt = now;
     return rows[0];
   }
 
@@ -205,6 +234,7 @@ class BotManager {
       this.halted = false;
       // ✅ 날짜가 바뀌면 캐시도 초기화
       this.cachedConfig = null;
+      this.cachedConfigAt = 0;
     }
     try {
       const [{ total }] = await db
@@ -248,8 +278,8 @@ class BotManager {
     if (!this.running || this.tickInFlight) return;
     this.tickInFlight = true;
     try {
-      // ✅ 수정 4: tick마다 캐시 무효화하여 최신 설정 반영
-      this.cachedConfig = null;
+      // ✅ 수정: 캐시는 TTL 기반으로 스스로 만료되므로 여기서 강제 무효화 불필요
+      // (설정 변경 시에는 reloadConfig()가 명시적으로 무효화)
       const config = await this.getConfig();
       const symbols = this.resolveWatchSymbols(config);
       this.currentSymbols = symbols;
@@ -260,12 +290,18 @@ class BotManager {
       await this.refreshDailyPnl(config);
       if (this.halted) {
         await this.addLog("warning", `🛑 손실 한도 도달 상태 — 신규 진입 건너뜀 (오늘 PnL ${this.dailyPnlPercent.toFixed(2)}%)`);
+        // ✅ 수정: 손실 한도 도달해도 기존 포지션 청산은 계속 — TP/SL이 적용되도록
+        try { await this.manageActivePositions(config); } catch (err) { logger.warn({ err }, "manageActivePositions failed during halt"); }
         return;
       }
       const results = await Promise.allSettled(symbols.map((sym) => this.processSymbol(sym, config)));
       results.forEach((r, idx) => {
         if (r.status === "rejected") logger.error({ err: r.reason, symbol: symbols[idx] }, "processSymbol failed");
       });
+      // ✅ 수정: 신규 진입 직후 즉시 TP/SL 검사 — 최대 30초 지연을 없앰 (특히 레버리지 상황에서 빠른 반전 대응)
+      try { await this.manageActivePositions(config); } catch (err) { logger.warn({ err }, "manageActivePositions failed post-tick"); }
+      // ✅ 추가: tick 완료 후 최신 상태를 SSE로 푸시
+      this.emitStatus();
     } catch (err) {
       logger.error({ err }, "Bot tick error");
       const msg = err instanceof Error ? err.message : String(err);
@@ -555,7 +591,11 @@ class BotManager {
     if (!Number.isFinite(movePct)) movePct = 0;
     if (dir === 1 && movePct < 0) movePct = Math.abs(movePct);
     if (dir === -1 && movePct > 0) movePct = -Math.abs(movePct);
-    const absMove = Math.min(6, Math.max(0.2, Math.abs(movePct)));
+    // ✅ 수정: 하한을 고정 0.2%에서 ATR 연동으로 변경
+    // 저변동성 구간(예: ATR 0.1%)에서 0.2% 움직임을 강제로 예상하면 과도한 진입 유도됨
+    // 하한 = max(0.1%, ATR * 0.3) — 진짜 조용한 시장에서는 작은 움직임만 기대
+    const dynamicMinMove = Math.max(0.1, (atrPercent ?? 0.5) * 0.3);
+    const absMove = Math.min(6, Math.max(dynamicMinMove, Math.abs(movePct)));
     movePct = dir * absMove;
     let entry = decision.suggestedEntryPrice;
     if (!Number.isFinite(entry) || entry <= 0) entry = currentPrice;
@@ -856,6 +896,10 @@ Predict the next ~10–20 candle price move and decide BUY/SELL/HOLD with TP/SL.
     } catch (err) {
       logger.error({ err }, "Failed to insert bot log");
     }
+    // ✅ 추가: SSE 구독자에게 즉시 푸시 (DB 삽입 실패해도 실시간 UI는 업데이트)
+    try {
+      botEvents.emitLog({ level, message, symbol: symbol ?? null, action: action ?? null });
+    } catch { /* best-effort */ }
   }
 }
 
