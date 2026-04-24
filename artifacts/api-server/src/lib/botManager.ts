@@ -8,6 +8,7 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { logger } from "./logger";
 import { notifyAlert, notifyEntry, notifyExit } from "./telegram";
 
+// ✅ 수정 5: 모델명 확인 — claude-haiku-4-5 는 올바른 API ID
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
 
 interface BotStatus {
@@ -181,7 +182,9 @@ class BotManager {
     return Array.from(new Set(cleaned));
   }
 
+  // ✅ 수정 4: cachedConfig 활용 — DB 조회 최소화
   private async getConfig(): Promise<BotConfigRow> {
+    if (this.cachedConfig) return this.cachedConfig;
     const rows = await db.select().from(botConfigTable).limit(1);
     if (rows.length === 0) {
       const [created] = await db.insert(botConfigTable).values({}).returning();
@@ -194,7 +197,12 @@ class BotManager {
 
   private async refreshDailyPnl(config: BotConfigRow): Promise<void> {
     const today = startOfTodayUtc().getTime();
-    if (today !== this.dailyResetDay) { this.dailyResetDay = today; this.halted = false; }
+    if (today !== this.dailyResetDay) {
+      this.dailyResetDay = today;
+      this.halted = false;
+      // ✅ 날짜가 바뀌면 캐시도 초기화
+      this.cachedConfig = null;
+    }
     try {
       const [{ total }] = await db
         .select({ total: sql<number>`coalesce(sum(${tradeHistoryTable.pnl}), 0)` })
@@ -237,6 +245,8 @@ class BotManager {
     if (!this.running || this.tickInFlight) return;
     this.tickInFlight = true;
     try {
+      // ✅ 수정 4: tick마다 캐시 무효화하여 최신 설정 반영
+      this.cachedConfig = null;
       const config = await this.getConfig();
       const symbols = this.resolveWatchSymbols(config);
       this.currentSymbols = symbols;
@@ -440,27 +450,29 @@ class BotManager {
         stopLoss = entryPrice * (1 - dir * params.stopLossPercent / 100);
       }
 
-      // ✅ 트랜잭션 제거 — 직접 select 후 insert
+      // ✅ 수정 1+2: positionInserted 선언 추가, quantity 중복 선언 분리
+      let positionInserted = false;
+      const baseQuantity = params.tradeAmount / entryPrice;
+
       try {
-          const existing = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
-          if (existing.length > 0) {
-            await this.addLog("info", `${symbol} 이미 포지션 보유 중 (${side}) — 신규 진입 건너뜀`, symbol);
-            return;
-          }
-          const quantity = params.tradeAmount / entryPrice;
-          await db.insert(activePositionsTable).values({
-            symbol,
-            side,
-            entryPrice,
-            quantity,
-            takeProfit,
-            stopLoss,
-            expectedMovePercent: decision.expectedMovePercent,
-            aiConfidence: decision.confidence,
-            aiReasoning: decision.reasoning,
-            triggeredBy: isPaper ? "paper" : "bot",
-          });
-          positionInserted = true;
+        const existing = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
+        if (existing.length > 0) {
+          await this.addLog("info", `${symbol} 이미 포지션 보유 중 (${side}) — 신규 진입 건너뜀`, symbol);
+          return;
+        }
+        await db.insert(activePositionsTable).values({
+          symbol,
+          side,
+          entryPrice,
+          quantity: baseQuantity,
+          takeProfit,
+          stopLoss,
+          expectedMovePercent: decision.expectedMovePercent,
+          aiConfidence: decision.confidence,
+          aiReasoning: decision.reasoning,
+          triggeredBy: isPaper ? "paper" : "bot",
+        });
+        positionInserted = true;
       } catch (err) {
         const errMsg = `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`;
         await this.addLog("error", errMsg, symbol);
@@ -471,24 +483,33 @@ class BotManager {
       try {
         const leverage = config.leverage ?? 10;
         const notional = params.tradeAmount * leverage;
-        const quantity = notional / entryPrice;
+        // ✅ 수정 2: 레버리지 적용 수량은 별도 변수명 사용
+        const leveragedQuantity = notional / entryPrice;
         const positionSide = side === "long" ? "LONG" : "SHORT";
         let exchangeOrderId: string | undefined;
         if (isPaper) {
-          await db.update(activePositionsTable).set({ quantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
+          await db.update(activePositionsTable).set({ quantity: leveragedQuantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         } else {
-          const order = await exchangeService.placeOrder(symbol, decision.action.toLowerCase(), "market", quantity, undefined, { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" });
+          const order = await exchangeService.placeOrder(symbol, decision.action.toLowerCase(), "market", leveragedQuantity, undefined, { positionSide, leverage, marginType: config.marginType ?? "ISOLATED" });
           exchangeOrderId = order.id;
-          await db.update(activePositionsTable).set({ quantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
+          await db.update(activePositionsTable).set({ quantity: leveragedQuantity }).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
         }
         this.executedTrades++;
-        await db.insert(tradeHistoryTable).values({ symbol, side: decision.action.toLowerCase(), price: entryPrice, quantity, total: params.tradeAmount, fee: params.tradeAmount * 0.001, pnl: 0, triggeredBy: isPaper ? "paper" : "bot", exchangeOrderId });
+        await db.insert(tradeHistoryTable).values({ symbol, side: decision.action.toLowerCase(), price: entryPrice, quantity: leveragedQuantity, total: params.tradeAmount, fee: params.tradeAmount * 0.001, pnl: 0, triggeredBy: isPaper ? "paper" : "bot", exchangeOrderId });
         await this.addLog("trade", `${isPaper ? "[가상] " : ""}진입 ${decision.action} ${symbol} @ $${entryPrice.toFixed(2)} | TP $${takeProfit.toFixed(2)} / SL $${stopLoss.toFixed(2)}`, symbol, decision.action);
         this.fetchSignalStats(symbol).then((signalStats) => {
           notifyEntry({ symbol, action: decision.action, entryPrice, takeProfit, stopLoss, confidence: decision.confidence, expectedMovePercent: decision.expectedMovePercent, bullishCount: divergence.bullishCount, bearishCount: divergence.bearishCount, signalStats, isPaper });
         }).catch((err) => logger.warn({ err }, "Failed to send entry notification"));
       } catch (err) {
-        await db.delete(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side))).catch(() => {});
+        // ✅ 수정 3: 롤백 실패 시 무시하지 않고 로그 기록
+        if (positionInserted) {
+          await db.delete(activePositionsTable)
+            .where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)))
+            .catch((deleteErr) => {
+              logger.error({ err: deleteErr, symbol }, "⚠️ 포지션 롤백 실패 — DB에 유령 포지션이 남아 있을 수 있음");
+              this.addLog("error", `⚠️ 포지션 롤백 실패 (${symbol}) — 수동 확인 필요`, symbol).catch(() => {});
+            });
+        }
         const msg = err instanceof Error ? err.message : String(err);
         await this.addLog("error", `거래 실행 실패 (${symbol}): ${msg}`, symbol);
         await this.maybeNotify("error", `진입 주문 실패 (${symbol}): ${msg}`, config, `entry-fail-${symbol}`);
