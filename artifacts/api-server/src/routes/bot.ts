@@ -213,6 +213,15 @@ router.put("/config", async (req, res) => {
     if (body.usePartialTp !== undefined) updateData.usePartialTp = Boolean(body.usePartialTp);
     if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
 
+    // ── 반대 신호 조기 청산
+    if (body.useEarlyExitOnOpposite !== undefined) updateData.useEarlyExitOnOpposite = Boolean(body.useEarlyExitOnOpposite);
+    setIfValidNumber(updateData, "earlyExitOppositeCount", body.earlyExitOppositeCount, { min: 1, max: 10, integer: true });
+
+    // ── 저변동성 TP 하향 조정
+    if (body.useLowVolTpReduction !== undefined) updateData.useLowVolTpReduction = Boolean(body.useLowVolTpReduction);
+    setIfValidNumber(updateData, "lowVolAtrThreshold", body.lowVolAtrThreshold, { min: 0.1, max: 5.0 });
+    setIfValidNumber(updateData, "lowVolTpMultiplier", body.lowVolTpMultiplier, { min: 0.1, max: 1.0 });
+
     // symbolOverrides 객체
     if (body.symbolOverrides !== undefined && body.symbolOverrides && typeof body.symbolOverrides === "object") {
       updateData.symbolOverrides = sanitizeSymbolOverrides(body.symbolOverrides as Record<string, unknown>);
@@ -351,6 +360,11 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     partialTpPercent: row.partialTpPercent,
     paperTrading: row.paperTrading,
     entryMode: row.entryMode,
+    useEarlyExitOnOpposite: row.useEarlyExitOnOpposite,
+    earlyExitOppositeCount: row.earlyExitOppositeCount,
+    useLowVolTpReduction: row.useLowVolTpReduction,
+    lowVolAtrThreshold: row.lowVolAtrThreshold,
+    lowVolTpMultiplier: row.lowVolTpMultiplier,
   };
 }
 
