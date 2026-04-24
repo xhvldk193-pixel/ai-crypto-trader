@@ -10,6 +10,14 @@ const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   throw new Error("SESSION_SECRET must be set");
 }
+// ✅ 최소 32자 강제 — 짧은 시크릿은 세션 위조에 취약
+// 생성: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+if (SESSION_SECRET.length < 32) {
+  throw new Error(
+    `SESSION_SECRET must be at least 32 characters (got ${SESSION_SECRET.length}). ` +
+    `Run: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`,
+  );
+}
 
 // ─────────────────────────────────────────────────────
 // 비밀번호 검증 — scrypt 해시 우선, 평문은 하위호환 경고

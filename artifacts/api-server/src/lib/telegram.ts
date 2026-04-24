@@ -41,8 +41,31 @@ export async function sendOwnerMessage(text: string): Promise<void> {
   }
 }
 
+// ✅ Debounce 맵 — 주기적 정리로 장기 운영 시 메모리 누수 방지
 const alertDebounceMap = new Map<string, number>();
-const ALERT_DEBOUNCE_MS = 5 * 60 * 1000;
+const ALERT_DEBOUNCE_MS = 5 * 60 * 1000;       // 5분 중복 방지
+const DEBOUNCE_CLEANUP_INTERVAL_MS = 30 * 60 * 1000; // 30분마다 정리
+const DEBOUNCE_MAP_MAX_SIZE = 500;              // 비상 상한선
+
+function cleanupDebounceMap() {
+  const now = Date.now();
+  // 만료된 항목 제거
+  for (const [key, ts] of alertDebounceMap.entries()) {
+    if (now - ts > ALERT_DEBOUNCE_MS) {
+      alertDebounceMap.delete(key);
+    }
+  }
+  // 상한선 초과 시 가장 오래된 것부터 제거
+  if (alertDebounceMap.size > DEBOUNCE_MAP_MAX_SIZE) {
+    const sorted = [...alertDebounceMap.entries()].sort((a, b) => a[1] - b[1]);
+    const excess = sorted.slice(0, alertDebounceMap.size - DEBOUNCE_MAP_MAX_SIZE);
+    for (const [key] of excess) alertDebounceMap.delete(key);
+  }
+}
+
+// 프로세스 종료를 막지 않도록 unref
+const cleanupTimer = setInterval(cleanupDebounceMap, DEBOUNCE_CLEANUP_INTERVAL_MS);
+if (typeof cleanupTimer.unref === "function") cleanupTimer.unref();
 
 export async function notifyAlert(
   level: "error" | "warning" | "info",
@@ -117,7 +140,6 @@ export async function notifyEntry(params: {
 
 /**
  * 청산 시 결과를 텔레그램으로 전송.
- * bot.ts의 manageActivePositions에서 TP/SL 청산 직후 호출.
  */
 export async function notifyExit(params: {
   symbol: string;

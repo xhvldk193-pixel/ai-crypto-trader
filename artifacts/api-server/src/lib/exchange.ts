@@ -28,31 +28,42 @@ export interface PlaceOrderOpts {
   marginType?: string;
 }
 
-// ─── ccxt 인스턴스 생성 ───────────────────────────────────────────────────────
+// ─── ccxt lazy init — 서버 시작 실패 방지 ────────────────────────────────────
+// 모듈 로드 시점에 throw하지 않고, 첫 실제 API 호출 시 초기화.
+// 환경변수 문제나 잘못된 EXCHANGE_ID가 있어도 서버는 정상 기동됨.
 
-function createExchange(): Exchange {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ExchangeClass = (ccxt as any)[EXCHANGE_ID];
-  if (!ExchangeClass) throw new Error(`지원하지 않는 거래소: ${EXCHANGE_ID}`);
+let _ex: Exchange | null = null;
+let _exInitError: Error | null = null;
 
-  const options: Record<string, unknown> = {
-    apiKey: API_KEY ?? "",
-    secret: SECRET ?? "",
-    options: { defaultType: "swap" }, // 선물/영구계약
-  };
-  if (PASSWORD) options.password = PASSWORD;
-
-  const ex: Exchange = new ExchangeClass(options);
-
-  // 비트겟: 헤지 모드 활성화 옵션
-  if (EXCHANGE_ID === "bitget") {
-    ex.options["positionMode"] = "hedged";
+function getExchange(): Exchange {
+  if (_exInitError) throw _exInitError;
+  if (_ex) return _ex;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ExchangeClass = (ccxt as any)[EXCHANGE_ID];
+    if (!ExchangeClass) throw new Error(`지원하지 않는 거래소: ${EXCHANGE_ID}`);
+    const options: Record<string, unknown> = {
+      apiKey: API_KEY ?? "",
+      secret: SECRET ?? "",
+      options: { defaultType: "swap" },
+    };
+    if (PASSWORD) options.password = PASSWORD;
+    const instance: Exchange = new ExchangeClass(options);
+    if (EXCHANGE_ID === "bitget") {
+      instance.options["positionMode"] = "hedged";
+    }
+    _ex = instance;
+    return _ex;
+  } catch (err) {
+    _exInitError = err instanceof Error ? err : new Error(String(err));
+    logger.error({ err: _exInitError }, "거래소 초기화 실패");
+    throw _exInitError;
   }
-
-  return ex;
 }
 
-const ex = createExchange();
+// 하위 호환: 기존 코드가 `ex.` 로 접근하는 부분을 모두 `getExchange().` 로 교체
+// (아래 코드에서 ex → getExchange() 로 변경됨)
+
 
 // ─── 심볼 변환 ───────────────────────────────────────────────────────────────
 // ccxt는 "BTC/USDT:USDT" 형식 (linear perpetual)
@@ -81,7 +92,7 @@ async function ensureSymbolSetup(
 
   try {
     // Bitget 헤지 모드: setMarginMode는 holdSide 불필요 (심볼 단위)
-    await ex.setMarginMode(marginType.toLowerCase(), swapSym);
+    await getExchange().setMarginMode(marginType.toLowerCase(), swapSym);
   } catch (err) {
     logger.warn({ err: String(err), symbol }, "setMarginMode 실패 (이미 설정됐을 수 있음)");
   }
@@ -91,7 +102,7 @@ async function ensureSymbolSetup(
     // (안 주면 양방향 모두 설정 시도하다 실패)
     const setLevParams: Record<string, unknown> =
       EXCHANGE_ID === "bitget" ? { holdSide } : {};
-    await ex.setLeverage(leverage, swapSym, setLevParams);
+    await getExchange().setLeverage(leverage, swapSym, setLevParams);
   } catch (err) {
     logger.warn({ err: String(err), symbol, leverage, holdSide }, "setLeverage 실패");
     throw err;
@@ -143,7 +154,7 @@ export async function syncDemoPositionsFromDb(positions: Array<{
 // ─── 공개 시세 ───────────────────────────────────────────────────────────────
 async function fetchPublicTicker(symbol: string) {
   const swapSym = toSwapSymbol(symbol);
-  const ticker = await ex.fetchTicker(swapSym);
+  const ticker = await getExchange().fetchTicker(swapSym);
   return {
     symbol,
     price: ticker.last ?? ticker.close ?? 0,
@@ -161,7 +172,7 @@ type Candle = { timestamp: number; open: number; high: number; low: number; clos
 
 async function fetchOhlcv(symbol: string, timeframe: string, limit: number): Promise<Candle[]> {
   const swapSym = toSwapSymbol(symbol);
-  const data = await ex.fetchOHLCV(swapSym, timeframe, undefined, limit);
+  const data = await getExchange().fetchOHLCV(swapSym, timeframe, undefined, limit);
   return data.map((k) => ({
     timestamp: k[0] as number,
     open: k[1] as number,
@@ -186,7 +197,7 @@ async function fetchOhlcvRange(
     if (since === prevSince) break;
     prevSince = since;
 
-    const data = await ex.fetchOHLCV(swapSym, timeframe, since, PAGE);
+    const data = await getExchange().fetchOHLCV(swapSym, timeframe, since, PAGE);
     if (!data || data.length === 0) break;
     for (const k of data) {
       if ((k[0] as number) > endMs) break;
@@ -211,7 +222,7 @@ async function fetchOhlcvRange(
 async function fetchFundingRate(symbol: string): Promise<number | null> {
   try {
     const swapSym = toSwapSymbol(symbol);
-    const data = await ex.fetchFundingRate(swapSym);
+    const data = await getExchange().fetchFundingRate(swapSym);
     const v = data?.fundingRate ?? null;
     return typeof v === "number" && Number.isFinite(v) ? v : null;
   } catch (err) {
@@ -223,7 +234,7 @@ async function fetchFundingRate(symbol: string): Promise<number | null> {
 async function fetchOpenInterest(symbol: string): Promise<number | null> {
   try {
     const swapSym = toSwapSymbol(symbol);
-    const data = await ex.fetchOpenInterest(swapSym);
+    const data = await getExchange().fetchOpenInterest(swapSym);
     const v = data?.openInterestAmount ?? data?.openInterest ?? null;
     return typeof v === "number" && Number.isFinite(v) ? v : null;
   } catch (err) {
@@ -238,8 +249,8 @@ export const exchangeService = {
 
   async getSymbols(): Promise<string[]> {
     try {
-      await ex.loadMarkets();
-      return Object.keys(ex.markets)
+      await getExchange().loadMarkets();
+      return Object.keys(getExchange().markets)
         .filter((s) => s.endsWith("/USDT:USDT"))
         .slice(0, 50)
         .map((s) => s.replace(":USDT", ""));
@@ -276,7 +287,7 @@ export const exchangeService = {
         balances: [{ asset: "USDT", free: demoWallet, locked: 0, usdValue: totalUsd }],
       };
     }
-    const data = await ex.fetchBalance({ type: 'swap' });
+    const data = await getExchange().fetchBalance({ type: 'swap' });
     const usdt = data.USDT ?? data["USDT"] ?? {};
     const free = (usdt.free as number) ?? 0;
     const total = (usdt.total as number) ?? 0;
@@ -300,7 +311,7 @@ export const exchangeService = {
       return [...demoPositions];
     }
 
-    const data = await ex.fetchPositions();
+    const data = await getExchange().fetchPositions();
     return data
       .filter((p) => Math.abs(p.contracts ?? 0) > 0 || Math.abs(parseFloat(String(p.contractSize ?? "0"))) > 0)
       .map((p) => {
@@ -389,7 +400,7 @@ export const exchangeService = {
 
     if (type === "limit" && price) params.price = price;
 
-    const order = await ex.createOrder(
+    const order = await getExchange().createOrder(
       swapSym,
       type,
       sideUpper.toLowerCase(),
@@ -416,7 +427,7 @@ export const exchangeService = {
       return demoOrders.filter((o) => o.status === "open" && (!symbol || o.symbol === symbol));
     }
     const swapSym = symbol ? toSwapSymbol(symbol) : undefined;
-    const orders = await ex.fetchOpenOrders(swapSym);
+    const orders = await getExchange().fetchOpenOrders(swapSym);
     return orders.map((o) => ({
       id: String(o.id),
       symbol: (o.symbol ?? "").replace(":USDT", ""),
@@ -436,7 +447,7 @@ export const exchangeService = {
       if (idx >= 0) demoOrders.splice(idx, 1);
       return true;
     }
-    await ex.cancelOrder(orderId, toSwapSymbol(symbol));
+    await getExchange().cancelOrder(orderId, toSwapSymbol(symbol));
     return true;
   },
 
@@ -451,7 +462,7 @@ export const exchangeService = {
       return found ? found.quantity : 0;
     }
     const swapSym = toSwapSymbol(symbol);
-    const positions = await ex.fetchPositions([swapSym]);
+    const positions = await getExchange().fetchPositions([swapSym]);
     const target = positionSide === "LONG" ? "long" : "short";
     const found = positions.find((p) => p.side === target);
     return Math.abs(found?.contracts ?? 0);
