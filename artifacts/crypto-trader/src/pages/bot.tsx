@@ -57,6 +57,13 @@ const botConfigSchema = z.object({
   entryMode: z.enum(["fixed", "full"]),
   paperTrading: z.boolean(),
   checkIntervalSeconds: z.coerce.number().int().min(60),
+  // 반대 신호 조기 청산
+  useEarlyExitOnOpposite: z.boolean(),
+  earlyExitOppositeCount: z.coerce.number().int().min(1).max(10),
+  // 저변동성 TP 하향
+  useLowVolTpReduction: z.boolean(),
+  lowVolAtrThreshold: z.coerce.number().min(0.1).max(5.0),
+  lowVolTpMultiplier: z.coerce.number().min(0.1).max(1.0),
 });
 
 const MTF_OPTIONS = ["1h", "4h", "1d"] as const;
@@ -125,6 +132,11 @@ export default function BotControl() {
       entryMode: "fixed",
       paperTrading: true,
       checkIntervalSeconds: 900,
+      useEarlyExitOnOpposite: false,
+      earlyExitOppositeCount: 3,
+      useLowVolTpReduction: false,
+      lowVolAtrThreshold: 0.5,
+      lowVolTpMultiplier: 0.6,
     },
   });
 
@@ -132,6 +144,8 @@ export default function BotControl() {
   const useTrailingValue = form.watch("useTrailingStop");
   const usePartialValue = form.watch("usePartialTp");
   const entryModeValue = form.watch("entryMode");
+  const useEarlyExitValue = form.watch("useEarlyExitOnOpposite");
+  const useLowVolValue = form.watch("useLowVolTpReduction");
 
 useEffect(() => {
   if (config) {
@@ -164,6 +178,11 @@ useEffect(() => {
     entryMode: (config.entryMode === "full" ? "full" : "fixed") as "fixed" | "full",
       paperTrading: config.paperTrading ?? false,
       checkIntervalSeconds: config.checkIntervalSeconds ?? 900,
+      useEarlyExitOnOpposite: (config as Record<string, unknown>).useEarlyExitOnOpposite as boolean ?? false,
+      earlyExitOppositeCount: (config as Record<string, unknown>).earlyExitOppositeCount as number ?? 3,
+      useLowVolTpReduction: (config as Record<string, unknown>).useLowVolTpReduction as boolean ?? false,
+      lowVolAtrThreshold: (config as Record<string, unknown>).lowVolAtrThreshold as number ?? 0.5,
+      lowVolTpMultiplier: (config as Record<string, unknown>).lowVolTpMultiplier as number ?? 0.6,
     });
   }
 }, [config]);
@@ -844,6 +863,93 @@ useEffect(() => {
                           </FormItem>
                         )}
                       />
+                    )}
+                  </div>
+
+                  {/* ── 반대 신호 조기 청산 ── */}
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <FormField
+                      control={form.control}
+                      name="useEarlyExitOnOpposite"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">반대 신호 조기 청산</FormLabel>
+                            <FormDescription>
+                              보유 중 반대 방향 다이버전스가 설정 개수 이상 발생하면 즉시 청산합니다.
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    {useEarlyExitValue && (
+                      <FormField
+                        control={form.control}
+                        name="earlyExitOppositeCount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel className="text-xs">반대 신호 임계값 (개)</FormLabel>
+                            <FormControl>
+                              <Input type="number" min={1} max={10} step={1} {...field} />
+                            </FormControl>
+                            <FormDescription className="text-xs">반대 방향 다이버전스가 이 값 이상이면 청산 (기본 3개)</FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                  </div>
+
+                  {/* ── 저변동성 TP 하향 조정 ── */}
+                  <div className="space-y-3 rounded-lg border p-4">
+                    <FormField
+                      control={form.control}
+                      name="useLowVolTpReduction"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">저변동성 목표 수익률 하향</FormLabel>
+                            <FormDescription>
+                              ATR%가 임계값 미만인 낮은 변동성 환경에서 목표 수익(TP)을 자동으로 줄입니다.
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    {useLowVolValue && (
+                      <div className="space-y-3 pl-1">
+                        <FormField
+                          control={form.control}
+                          name="lowVolAtrThreshold"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">ATR% 임계값</FormLabel>
+                              <FormControl>
+                                <Input type="number" min={0.1} max={5} step={0.1} {...field} />
+                              </FormControl>
+                              <FormDescription className="text-xs">이 값 미만의 ATR%를 저변동성으로 판단 (기본 0.5%)</FormDescription>
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="lowVolTpMultiplier"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">TP 축소 비율 (0.1 ~ 1.0)</FormLabel>
+                              <FormControl>
+                                <Input type="number" min={0.1} max={1.0} step={0.05} {...field} />
+                              </FormControl>
+                              <FormDescription className="text-xs">TP를 원래의 이 비율만큼 축소 (기본 0.6 = 60%)</FormDescription>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                     )}
                   </div>
 
