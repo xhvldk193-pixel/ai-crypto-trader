@@ -1,15 +1,26 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { db, aiSignalsTable, botConfigTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
 import { exchangeService } from "../lib/exchange";
 import { computeAtrPercent } from "../lib/indicators";
+// ✅ 서버측에서 직접 계산 — 클라이언트 입력 신뢰 금지
 import { analyzeDivergences } from "../lib/divergence";
 import { getMacroContext, formatMacroForPrompt } from "../lib/macro";
 
 const router = Router();
 
 const ANTHROPIC_MODEL = "claude-haiku-4-5";
+
+// ✅ Rate limit — AI 호출은 토큰 비용이 크므로 분당 10회 제한
+const aiSignalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many AI signal requests, please wait a moment." },
+});
 
 function extractJson(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -35,19 +46,38 @@ async function getMtfBias(symbol: string, timeframes: string[]): Promise<Record<
   return out;
 }
 
-router.post("/signal", async (req, res) => {
-  const { symbol, timeframe, divergenceData, currentPrice, change24h } = req.body;
-  if (!symbol || currentPrice === undefined) {
-    res.status(400).json({ error: "symbol and currentPrice required" }); return;
+function avgStrength(items: Array<{ strength: number }>): number {
+  if (items.length === 0) return 0;
+  return items.reduce((a, b) => a + b.strength, 0) / items.length;
+}
+
+// ✅ Rate limit 적용 + 입력 검증 강화 + 서버측 다이버전스 계산
+router.post("/signal", aiSignalLimiter, async (req, res) => {
+  const { symbol, timeframe, currentPrice, change24h } = req.body ?? {};
+
+  // ✅ 입력 검증
+  if (typeof symbol !== "string" || symbol.trim().length === 0) {
+    res.status(400).json({ error: "symbol must be a non-empty string" }); return;
   }
+  const cpNum = Number(currentPrice);
+  if (!Number.isFinite(cpNum) || cpNum <= 0) {
+    res.status(400).json({ error: "currentPrice must be a positive finite number" }); return;
+  }
+  const tf = typeof timeframe === "string" && timeframe.trim().length > 0
+    ? timeframe.trim() : "15m";
 
   try {
+    // ✅ 서버에서 직접 캔들 가져와서 다이버전스 계산 — 클라이언트 조작 불가
     let atrPercent: number | null = null;
+    let divergenceResult: ReturnType<typeof analyzeDivergences> | null = null;
     try {
-      const candles = await exchangeService.getOhlcv(symbol, timeframe || "15m", 100);
-      atrPercent = computeAtrPercent(candles, 14);
+      const candles = await exchangeService.getOhlcv(symbol, tf, 200);
+      if (candles.length >= 50) {
+        divergenceResult = analyzeDivergences(candles, symbol, tf);
+        atrPercent = computeAtrPercent(candles, 14);
+      }
     } catch (err) {
-      req.log.warn({ err }, "Failed to compute ATR for AI signal");
+      req.log.warn({ err }, "Failed to compute divergence/ATR for AI signal");
     }
 
     const cfgRows = await db.select().from(botConfigTable).limit(1);
@@ -63,14 +93,12 @@ router.post("/signal", async (req, res) => {
       getMacroContext(),
     ]);
 
-    const signals = (divergenceData?.signals ?? []) as Array<{
-      indicator: string; type: string; strength: number; description: string;
-    }>;
+    const signals = divergenceResult?.signals ?? [];
     const avgBullishStrength = avgStrength(signals.filter(s => s.type.startsWith("positive")));
     const avgBearishStrength = avgStrength(signals.filter(s => s.type.startsWith("negative")));
 
     const mtfText = Object.keys(mtf).length > 0
-      ? Object.entries(mtf).map(([tf, b]) => `  - ${tf}: ${b}`).join("\n")
+      ? Object.entries(mtf).map(([tfKey, b]) => `  - ${tfKey}: ${b}`).join("\n")
       : "  (disabled)";
     const fundingText = fundingRate !== null
       ? `Funding rate: ${(fundingRate * 100).toFixed(4)}%`
@@ -79,7 +107,7 @@ router.post("/signal", async (req, res) => {
       ? `Open interest: ${openInterest.toLocaleString()} contracts`
       : "Open interest: unavailable";
 
-    const systemPrompt = `You are an expert crypto trading assistant specialized in divergence-based scalping on the ${timeframe || "15m"} timeframe.
+    const systemPrompt = `You are an expert crypto trading assistant specialized in divergence-based scalping on the ${tf} timeframe.
 You analyze divergence signals from indicators (MACD, RSI, Stochastic, CCI, Momentum, OBV, VWMACD, CMF, MFI) to determine trades.
 Divergence types:
 - positive_regular: Price lower low, indicator higher low → Bullish reversal
@@ -111,16 +139,16 @@ Respond ONLY with valid JSON (no prose, no markdown fences) matching this exact 
   "suggestedTakeProfit": number
 }`;
 
-    const userMessage = `Analyze ${symbol} on ${timeframe || "15m"} timeframe.
-Current Price: $${currentPrice}
-24h Change: ${change24h !== undefined ? `${change24h > 0 ? "+" : ""}${Number(change24h).toFixed(2)}%` : "N/A"}
+    const userMessage = `Analyze ${symbol} on ${tf} timeframe.
+Current Price: $${cpNum}
+24h Change: ${change24h !== undefined ? `${Number(change24h) > 0 ? "+" : ""}${Number(change24h).toFixed(2)}%` : "N/A"}
 Recent ATR (volatility): ${atrPercent !== null ? `${atrPercent.toFixed(2)}% of price` : "unknown"}
 
 Divergence Analysis (primary TF):
-${divergenceData ? `- Overall Bias: ${divergenceData.overallBias}
-- Bullish Signals: ${divergenceData.bullishCount} (avg strength ${avgBullishStrength.toFixed(2)})
-- Bearish Signals: ${divergenceData.bearishCount} (avg strength ${avgBearishStrength.toFixed(2)})
-- Active Signals: ${signals.map(s => `${s.indicator}/${s.type}@${s.strength.toFixed(2)}`).join(", ") || "none"}` : "No divergence data."}
+${divergenceResult ? `- Overall Bias: ${divergenceResult.overallBias}
+- Bullish Signals: ${divergenceResult.bullishCount} (avg strength ${avgBullishStrength.toFixed(2)})
+- Bearish Signals: ${divergenceResult.bearishCount} (avg strength ${avgBearishStrength.toFixed(2)})
+- Active Signals: ${signals.map(s => `${s.indicator}/${s.type}@${s.strength.toFixed(2)}`).join(", ") || "none"}` : "No divergence data available."}
 
 Multi-Timeframe Bias:
 ${mtfText}
@@ -136,11 +164,11 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,
-      // ✅ Fix #6: JSON 단일 객체 반환이므로 max_tokens 8192는 과다 — 1024로 감소 (비용/속도 개선)
       max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
+
     const block = message.content[0];
     const content = block && block.type === "text" ? block.text : "";
     if (!content) throw new Error("Empty response from AI");
@@ -150,8 +178,9 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
     const action: "BUY" | "SELL" | "HOLD" =
       rawAction === "BUY" || rawAction === "SELL" ? rawAction : "HOLD";
     const confidence = Math.min(1, Math.max(0, Number(parsed.confidence) || 0.5));
-    const entryPrice = Number(parsed.suggestedEntryPrice) || Number(currentPrice);
-    let expectedMovePercent = Number.isFinite(parsed.expectedMovePercent) ? Number(parsed.expectedMovePercent) : 0;
+    const entryPrice = Number(parsed.suggestedEntryPrice) || cpNum;
+    let expectedMovePercent = Number.isFinite(parsed.expectedMovePercent)
+      ? Number(parsed.expectedMovePercent) : 0;
     if (action === "HOLD") expectedMovePercent = 0;
 
     let takeProfit = Number(parsed.suggestedTakeProfit);
@@ -163,8 +192,6 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
       stopLoss = entryPrice * (1 - dir * moveAbs * 0.5);
     }
 
-    const expectedMoveUsd = (expectedMovePercent / 100) * entryPrice;
-
     res.json({
       action,
       confidence,
@@ -174,8 +201,13 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
       suggestedStopLoss: action === "HOLD" ? null : stopLoss,
       suggestedTakeProfit: action === "HOLD" ? null : takeProfit,
       expectedMovePercent,
-      expectedMoveUsd,
+      expectedMoveUsd: (expectedMovePercent / 100) * entryPrice,
       atrPercent: atrPercent ?? undefined,
+      divergence: divergenceResult ? {
+        bullishCount: divergenceResult.bullishCount,
+        bearishCount: divergenceResult.bearishCount,
+        overallBias: divergenceResult.overallBias,
+      } : null,
       analyzedAt: Date.now(),
     });
   } catch (err) {
@@ -187,9 +219,7 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 router.get("/latest-signal", async (req, res) => {
   try {
     const rows = await db.select().from(aiSignalsTable).orderBy(desc(aiSignalsTable.createdAt)).limit(1);
-    if (rows.length === 0) {
-      res.json({}); return;
-    }
+    if (rows.length === 0) { res.json({}); return; }
     const r = rows[0];
     res.json({ signal: {
       id: String(r.id),
@@ -208,7 +238,7 @@ router.get("/latest-signal", async (req, res) => {
       bullishCount: r.bullishCount,
       bearishCount: r.bearishCount,
       createdAt: r.createdAt.getTime(),
-    } });
+    }});
   } catch (err) {
     req.log.error({ err }, "Failed to load latest AI signal");
     res.status(500).json({ error: "Failed to load latest AI signal" });
@@ -228,7 +258,7 @@ router.get("/latest-signals-by-symbol", async (req, res) => {
     );
     const rows = await db.select().from(aiSignalsTable).orderBy(desc(aiSignalsTable.createdAt)).limit(500);
     const seen = new Set<string>();
-    const signals = [] as Array<Record<string, unknown>>;
+    const signals: Array<Record<string, unknown>> = [];
     for (const r of rows) {
       if (watchSet.size > 0 && !watchSet.has(r.symbol)) continue;
       if (seen.has(r.symbol)) continue;
@@ -258,10 +288,5 @@ router.get("/latest-signals-by-symbol", async (req, res) => {
     res.status(500).json({ error: "Failed to load latest AI signals by symbol" });
   }
 });
-
-function avgStrength(items: Array<{ strength: number }>): number {
-  if (items.length === 0) return 0;
-  return items.reduce((a, b) => a + b.strength, 0) / items.length;
-}
 
 export default router;
