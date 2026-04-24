@@ -461,7 +461,6 @@ class BotManager {
             triggeredBy: isPaper ? "paper" : "bot",
           });
           positionInserted = true;
-        });
       } catch (err) {
         const errMsg = `포지션 등록 실패 (${symbol}): ${err instanceof Error ? err.message : String(err)}`;
         await this.addLog("error", errMsg, symbol);
