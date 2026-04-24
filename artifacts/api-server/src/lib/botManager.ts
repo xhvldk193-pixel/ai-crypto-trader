@@ -607,7 +607,7 @@ class BotManager {
 
       let positionInserted = false;
       try {
-        await db.transaction(async (tx) => {
+        const txExisting = await db.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
           const existing = await tx.select().from(activePositionsTable).where(and(eq(activePositionsTable.symbol, symbol), eq(activePositionsTable.side, side)));
           if (existing.length > 0) {
             return;
