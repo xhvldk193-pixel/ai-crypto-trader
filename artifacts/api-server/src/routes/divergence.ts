@@ -239,3 +239,20 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
     analyzedAt: Date.now(),
   };
 }
+// divergence.ts 맨 아래에 추가 (export function analyzeDivergences 다음에)
+
+import { Router, type Request, type Response } from "express";
+
+const router = Router();
+
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const { symbol, timeframe } = req.query as { symbol: string; timeframe: string };
+    // candles는 market 서비스에서 가져와야 함 — 일단 placeholder
+    res.json({ message: "divergence endpoint ok", symbol, timeframe });
+  } catch (err) {
+    res.status(500).json({ error: "Divergence analysis failed" });
+  }
+});
+
+export default router;
