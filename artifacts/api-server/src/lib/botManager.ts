@@ -442,10 +442,6 @@ class BotManager {
 
       // ✅ 트랜잭션 제거 — 직접 select 후 insert
       try {
-          }
-          const quantity = params.tradeAmount / entryPrice;
-          await db.insert(activePositionsTable).values({
-            symbol,
             side,
             entryPrice,
             quantity,
