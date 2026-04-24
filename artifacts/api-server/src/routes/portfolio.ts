@@ -67,7 +67,10 @@ router.get("/history", async (req, res) => {
   const symbol = req.query.symbol as string | undefined;
   const limit = Math.min(parseInt((req.query.limit as string) || "50", 10), 100);
   try {
-    const query = db.select().from(tradeHistoryTable).orderBy(desc(tradeHistoryTable.createdAt)).limit(limit);
+    // ✅ Fix #2: symbol 필터를 DB 쿼리 레벨에서 적용 — 메모리 필터 시 limit으로 인한 누락 방지
+    const query = symbol
+      ? db.select().from(tradeHistoryTable).where(eq(tradeHistoryTable.symbol, symbol)).orderBy(desc(tradeHistoryTable.createdAt)).limit(limit)
+      : db.select().from(tradeHistoryTable).orderBy(desc(tradeHistoryTable.createdAt)).limit(limit);
     const rows = await query;
     const trades = rows.map((r) => ({
       id: String(r.id),
@@ -80,7 +83,7 @@ router.get("/history", async (req, res) => {
       pnl: r.pnl ?? 0,
       triggeredBy: r.triggeredBy,
       timestamp: r.createdAt.getTime(),
-    })).filter((t) => !symbol || t.symbol === symbol);
+    }));
     res.json({ trades });
   } catch (err) {
     req.log.error({ err }, "Failed to get trade history");
