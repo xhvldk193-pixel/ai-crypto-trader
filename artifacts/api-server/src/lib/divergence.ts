@@ -239,4 +239,3 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
     analyzedAt: Date.now(),
   };
 }
-export default router;
