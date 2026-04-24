@@ -424,4 +424,3 @@ export const exchangeService = {
     return Math.abs(found?.contracts ?? 0);
   },
 };
-export default router;
