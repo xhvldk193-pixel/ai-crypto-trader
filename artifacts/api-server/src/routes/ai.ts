@@ -136,7 +136,8 @@ Predict the next ~10–20 candle price move and set TP/SL accordingly.`;
 
     const message = await anthropic.messages.create({
       model: ANTHROPIC_MODEL,
-      max_tokens: 8192,
+      // ✅ Fix #6: JSON 단일 객체 반환이므로 max_tokens 8192는 과다 — 1024로 감소 (비용/속도 개선)
+      max_tokens: 1024,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     });
