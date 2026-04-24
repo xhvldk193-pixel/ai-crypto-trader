@@ -104,6 +104,34 @@ const demoOrders: Array<{
   status: string; price: number; quantity: number; filled: number; timestamp: number;
 }> = [];
 
+// ✅ Fix #7: 서버 재시작 시 DB의 paper 포지션을 메모리로 복원 — 유령 포지션 방지
+// exchangeService가 초기화된 후 botManager.start()보다 먼저 호출됨
+export async function syncDemoPositionsFromDb(positions: Array<{
+  symbol: string; side: string; entryPrice: number; quantity: number;
+}>): Promise<void> {
+  if (!IS_DEMO) return;
+  demoPositions.length = 0;
+  for (const p of positions) {
+    let currentPrice = p.entryPrice;
+    try {
+      const ticker = await fetchPublicTicker(p.symbol);
+      currentPrice = ticker.price;
+    } catch { /* keep entry price as fallback */ }
+    const side = p.side === "short" ? "short" : "long";
+    const diff = (currentPrice - p.entryPrice) / p.entryPrice;
+    demoPositions.push({
+      symbol: p.symbol,
+      side,
+      entryPrice: p.entryPrice,
+      currentPrice,
+      quantity: p.quantity,
+      pnl: diff * p.quantity * p.entryPrice * (side === "long" ? 1 : -1),
+      pnlPercent: diff * 100 * (side === "long" ? 1 : -1),
+      openedAt: Date.now(),
+    });
+  }
+}
+
 // ─── 공개 시세 ───────────────────────────────────────────────────────────────
 async function fetchPublicTicker(symbol: string) {
   const swapSym = toSwapSymbol(symbol);
