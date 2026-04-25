@@ -8,15 +8,14 @@ import portfolioRouter from "./portfolio";
 import tradeRouter from "./trade";
 import botRouter from "./bot";
 import backtestRouter from "./backtest";
+import listingRouter from "./listing";           // ✅ 추가
 import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
-// Public: health check + auth endpoints
 router.use(healthRouter);
 router.use("/auth", authRouter);
 
-// All other API routes require an authenticated session
 router.use(requireAuth);
 router.use("/market", marketRouter);
 router.use("/divergence", divergenceRouter);
@@ -25,5 +24,6 @@ router.use("/portfolio", portfolioRouter);
 router.use("/trade", tradeRouter);
 router.use("/bot", botRouter);
 router.use("/backtest", backtestRouter);
+router.use("/listing", listingRouter);           // ✅ 추가
 
 export default router;
