@@ -104,6 +104,21 @@ router.put("/config", async (req, res) => {
       if (Number.isFinite(v) && v >= 10 && v <= 90) updateData.partialTpPercent = v;
     }
     if (body.paperTrading !== undefined) updateData.paperTrading = Boolean(body.paperTrading);
+    if (body.useEarlyExitOnOpposite !== undefined) updateData.useEarlyExitOnOpposite = Boolean(body.useEarlyExitOnOpposite);
+    setIfValidNumber(updateData, "earlyExitOppositeCount", body.earlyExitOppositeCount, { min: 1, max: 10, integer: true });
+    if (body.useLowVolTpReduction !== undefined) updateData.useLowVolTpReduction = Boolean(body.useLowVolTpReduction);
+    setIfValidNumber(updateData, "lowVolAtrThreshold", body.lowVolAtrThreshold, { min: 0.1, max: 5.0 });
+    setIfValidNumber(updateData, "lowVolTpMultiplier", body.lowVolTpMultiplier, { min: 0.1, max: 1.0 });
+    if (body.useAiPositionSize !== undefined) updateData.useAiPositionSize = Boolean(body.useAiPositionSize);
+    setIfValidNumber(updateData, "aiPositionSizeMin", body.aiPositionSizeMin, { min: 0.1, max: 1.0 });
+    setIfValidNumber(updateData, "aiPositionSizeMax", body.aiPositionSizeMax, { min: 1.0, max: 3.0 });
+    if (body.useAiLeverage !== undefined) updateData.useAiLeverage = Boolean(body.useAiLeverage);
+    setIfValidNumber(updateData, "aiLeverageMin", body.aiLeverageMin, { min: 1, max: 125, integer: true });
+    setIfValidNumber(updateData, "aiLeverageMax", body.aiLeverageMax, { min: 1, max: 125, integer: true });
+    if (body.useMultiAiConsensus !== undefined) updateData.useMultiAiConsensus = Boolean(body.useMultiAiConsensus);
+    if (body.useAiDynamicTp !== undefined) updateData.useAiDynamicTp = Boolean(body.useAiDynamicTp);
+    if (body.useAiSymbolBlock !== undefined) updateData.useAiSymbolBlock = Boolean(body.useAiSymbolBlock);
+    if (body.useAiAutoTune !== undefined) updateData.useAiAutoTune = Boolean(body.useAiAutoTune);
     if (body.entryMode !== undefined) updateData.entryMode = body.entryMode;
     updateData.updatedAt = new Date();
 
