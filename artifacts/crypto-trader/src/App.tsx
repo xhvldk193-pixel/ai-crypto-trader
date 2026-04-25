@@ -12,6 +12,7 @@ import Portfolio from "@/pages/portfolio";
 import BotControl from "@/pages/bot";
 import Trade from "@/pages/trade";
 import Backtest from "@/pages/backtest";
+import Listing from "@/pages/listing";          // ✅ 추가
 import LoginPage from "@/pages/login";
 import { useGetAuthStatus, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,7 +31,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Globally redirect to login on any 401 by invalidating the auth query.
 queryClient.getQueryCache().subscribe((event) => {
   const error = event?.query?.state?.error as { response?: { status?: number } } | undefined;
   if (error?.response?.status === 401) {
@@ -50,7 +50,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     query: { refetchInterval: 60_000, retry: false } as never,
   });
 
-  // When auth state changes from authed -> not authed, clear cached data so we don't leak prior results.
   useEffect(() => {
     if (data?.authed === false) {
       qc.removeQueries({ predicate: (q) => {
@@ -71,10 +70,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isError || !data?.authed) {
-    return <LoginPage />;
-  }
-
+  if (isError || !data?.authed) return <LoginPage />;
   return <>{children}</>;
 }
 
@@ -88,6 +84,7 @@ function Router() {
         <Route path="/bot" component={BotControl} />
         <Route path="/trade" component={Trade} />
         <Route path="/backtest" component={Backtest} />
+        <Route path="/listing" component={Listing} />   {/* ✅ 추가 */}
         <Route component={NotFound} />
       </Switch>
     </Layout>
@@ -95,10 +92,7 @@ function Router() {
 }
 
 function ThemeProvider({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    document.documentElement.classList.add("dark");
-  }, []);
-
+  useEffect(() => { document.documentElement.classList.add("dark"); }, []);
   return <>{children}</>;
 }
 
