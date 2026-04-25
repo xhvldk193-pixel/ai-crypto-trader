@@ -8,6 +8,7 @@ import portfolioRouter from "./portfolio";
 import tradeRouter from "./trade";
 import botRouter from "./bot";
 import backtestRouter from "./backtest";
+import listingRouter from "./listing";
 import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -25,5 +26,6 @@ router.use("/portfolio", portfolioRouter);
 router.use("/trade", tradeRouter);
 router.use("/bot", botRouter);
 router.use("/backtest", backtestRouter);
+router.use("/listing", listingRouter);
 
 export default router;
