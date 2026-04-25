@@ -12,6 +12,7 @@ import Portfolio from "@/pages/portfolio";
 import BotControl from "@/pages/bot";
 import Trade from "@/pages/trade";
 import Backtest from "@/pages/backtest";
+import Listing from "@/pages/listing";
 import LoginPage from "@/pages/login";
 import { useGetAuthStatus, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -88,6 +89,7 @@ function Router() {
         <Route path="/bot" component={BotControl} />
         <Route path="/trade" component={Trade} />
         <Route path="/backtest" component={Backtest} />
+        <Route path="/listing" component={Listing} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

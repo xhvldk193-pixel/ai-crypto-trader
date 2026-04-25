@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
-import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight, History, LogOut } from "lucide-react";
+import { Activity, LayoutDashboard, LineChart, PieChart, Settings, ArrowLeftRight, History, LogOut, Rocket } from "lucide-react";
 import { useGetBotStatus, useLogout, getGetAuthStatusQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -27,6 +27,7 @@ export function Layout({ children }: { children: ReactNode }) {
     { href: "/bot", label: "Bot Control", icon: Settings },
     { href: "/trade", label: "Trade", icon: ArrowLeftRight },
     { href: "/backtest", label: "Backtest", icon: History },
+    { href: "/listing", label: "상장 프론트런", icon: Rocket },
   ];
 
   return (
