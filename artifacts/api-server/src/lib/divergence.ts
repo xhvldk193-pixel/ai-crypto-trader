@@ -88,7 +88,7 @@ function findPivotHighs(data: number[], period = 5): Array<{ index: number; valu
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
-      // > 로 수정: 동일한 값은 허용, 더 높은 값이 있을 때만 피벗 아님
+      // > 로 수정: 더 높은 값이 있을 때만 피벗 아님 (동일값 허용)
       if (j !== 0 && data[i + j] > data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
@@ -102,7 +102,7 @@ function findPivotLows(data: number[], period = 5): Array<{ index: number; value
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
-      // < 로 수정: 동일한 값은 허용, 더 낮은 값이 있을 때만 피벗 아님
+      // < 로 수정: 더 낮은 값이 있을 때만 피벗 아님 (동일값 허용)
       if (j !== 0 && data[i + j] < data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
@@ -113,7 +113,7 @@ function findPivotLows(data: number[], period = 5): Array<{ index: number; value
 function findNearestPivot(
   pivots: Array<{ index: number; value: number }>,
   targetIndex: number,
-  tolerance = 10
+  tolerance = 5  // 10→5: 더 엄격하게 매칭해서 엉뚱한 피벗 매칭 방지
 ): { index: number; value: number } | null {
   let best: { index: number; value: number } | null = null;
   let bestDist = Infinity;
@@ -137,7 +137,10 @@ function detectDivergences(
 ): DivergenceSignal[] {
   const signals: DivergenceSignal[] = [];
 
-  // ✅ Positive Regular: 가격 저점↓, 지표 저점↑ → 강세 반전
+  // 최소 강도 임계값: 너무 약한 신호는 노이즈로 무시
+  const MIN_STRENGTH = 0.03;
+
+  // ✅ Positive Regular (강세 반전): 가격 저점↓, 지표 저점↑
   const lastPriceLow = priceLows[priceLows.length - 1];
   const lastIndLow = lastPriceLow ? findNearestPivot(indLows, lastPriceLow.index) : null;
   if (lastPriceLow && lastIndLow) {
@@ -145,8 +148,11 @@ function detectDivergences(
     for (const ppl of priorPriceLows) {
       const matchedIndLow = findNearestPivot(indLows, ppl.index);
       if (!matchedIndLow) continue;
+      const priceDiffPct = (ppl.value - lastPriceLow.value) / ppl.value;
+      if (priceDiffPct < 0.001) continue; // 가격 차이 최소 0.1% 이상
       if (lastPriceLow.value < ppl.value && lastIndLow.value > matchedIndLow.value) {
         const strength = Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1);
+        if (strength < MIN_STRENGTH) break;
         signals.push({
           indicator: indicatorName,
           type: "positive_regular",
@@ -159,7 +165,7 @@ function detectDivergences(
     }
   }
 
-  // ✅ Negative Regular: 가격 고점↑, 지표 고점↓ → 약세 반전
+  // ✅ Negative Regular (약세 반전): 가격 고점↑, 지표 고점↓
   const lastPriceHigh = priceHighs[priceHighs.length - 1];
   const lastIndHigh = lastPriceHigh ? findNearestPivot(indHighs, lastPriceHigh.index) : null;
   if (lastPriceHigh && lastIndHigh) {
@@ -167,8 +173,11 @@ function detectDivergences(
     for (const pph of priorPriceHighs) {
       const matchedIndHigh = findNearestPivot(indHighs, pph.index);
       if (!matchedIndHigh) continue;
+      const priceDiffPct = (lastPriceHigh.value - pph.value) / pph.value;
+      if (priceDiffPct < 0.001) continue; // 가격 차이 최소 0.1% 이상
       if (lastPriceHigh.value > pph.value && lastIndHigh.value < matchedIndHigh.value) {
         const strength = Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1);
+        if (strength < MIN_STRENGTH) break;
         signals.push({
           indicator: indicatorName,
           type: "negative_regular",
@@ -181,14 +190,19 @@ function detectDivergences(
     }
   }
 
-  // ✅ Positive Hidden: 가격 저점↑, 지표 저점↓ → 강세 지속
-  if (lastPriceLow && lastIndLow) {
+  // ✅ Positive Hidden (강세 지속): 가격 저점↑, 지표 저점↓
+  // regular 신호와 중복 방지 + 더 강한 임계값 적용
+  const hasPositiveRegular = signals.some(s => s.type === "positive_regular");
+  if (!hasPositiveRegular && lastPriceLow && lastIndLow) {
     const priorPriceLows = priceLows.slice(0, -1).slice(-maxLookback);
     for (const ppl of priorPriceLows) {
       const matchedIndLow = findNearestPivot(indLows, ppl.index);
       if (!matchedIndLow) continue;
+      const priceDiffPct = (lastPriceLow.value - ppl.value) / ppl.value;
+      if (priceDiffPct < 0.001) continue; // 저점이 의미있게 올라야 함
       if (lastPriceLow.value > ppl.value && lastIndLow.value < matchedIndLow.value) {
         const strength = Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1);
+        if (strength < MIN_STRENGTH * 2) break; // hidden은 2배 엄격
         signals.push({
           indicator: indicatorName,
           type: "positive_hidden",
@@ -201,14 +215,18 @@ function detectDivergences(
     }
   }
 
-  // ✅ Negative Hidden: 가격 고점↓, 지표 고점↑ → 약세 지속
-  if (lastPriceHigh && lastIndHigh) {
+  // ✅ Negative Hidden (약세 지속): 가격 고점↓, 지표 고점↑
+  const hasNegativeRegular = signals.some(s => s.type === "negative_regular");
+  if (!hasNegativeRegular && lastPriceHigh && lastIndHigh) {
     const priorPriceHighs = priceHighs.slice(0, -1).slice(-maxLookback);
     for (const pph of priorPriceHighs) {
       const matchedIndHigh = findNearestPivot(indHighs, pph.index);
       if (!matchedIndHigh) continue;
+      const priceDiffPct = (pph.value - lastPriceHigh.value) / pph.value;
+      if (priceDiffPct < 0.001) continue; // 고점이 의미있게 내려야 함
       if (lastPriceHigh.value < pph.value && lastIndHigh.value > matchedIndHigh.value) {
         const strength = Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1);
+        if (strength < MIN_STRENGTH * 2) break; // hidden은 2배 엄격
         signals.push({
           indicator: indicatorName,
           type: "negative_hidden",
@@ -243,7 +261,6 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
 
   const allSignals: DivergenceSignal[] = [];
   for (const ind of indicators) {
-    // ✅ 지표의 피벗 고점/저점을 직접 계산하여 detectDivergences에 전달
     const indLows = findPivotLows(ind.data);
     const indHighs = findPivotHighs(ind.data);
     const divs = detectDivergences(priceLows, priceHighs, indLows, indHighs, ind.name);
