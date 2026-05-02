@@ -243,5 +243,17 @@ function configToResponse(row: typeof botConfigTable.$inferSelect) {
     entryMode: row.entryMode,
   };
 }
-
+function setIfValidNumber(
+  obj: Record<string, unknown>,
+  key: string,
+  value: unknown,
+  opts: { min?: number; max?: number; integer?: boolean } = {}
+) {
+  if (value === undefined || value === null || value === "") return;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return;
+  if (opts.min !== undefined && n < opts.min) return;
+  if (opts.max !== undefined && n > opts.max) return;
+  obj[key] = opts.integer ? Math.floor(n) : n;
+}
 export default router;
