@@ -88,7 +88,8 @@ function findPivotHighs(data: number[], period = 5): Array<{ index: number; valu
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
-      if (j !== 0 && data[i + j] >= data[i]) { isPivot = false; break; }
+      // > 로 수정: 동일한 값은 허용, 더 높은 값이 있을 때만 피벗 아님
+      if (j !== 0 && data[i + j] > data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
   }
@@ -101,7 +102,8 @@ function findPivotLows(data: number[], period = 5): Array<{ index: number; value
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
-      if (j !== 0 && data[i + j] <= data[i]) { isPivot = false; break; }
+      // < 로 수정: 동일한 값은 허용, 더 낮은 값이 있을 때만 피벗 아님
+      if (j !== 0 && data[i + j] < data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
   }
