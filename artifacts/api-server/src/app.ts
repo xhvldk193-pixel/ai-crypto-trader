@@ -6,6 +6,8 @@ import { logger } from "./lib/logger";
 import { sessionMiddleware } from "./lib/auth";
 import path from "path";
 import { fileURLToPath } from "url";
+import streamRouter from "./routes/stream";
+app.use("/stream", streamRouter);
 
 const app: Express = express();
 
