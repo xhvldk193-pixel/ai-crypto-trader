@@ -18,12 +18,15 @@ export type DivergenceSignal = {
   description: string;
 };
 
+export interface AnalyzeOptions {
+  dontConfirm?: boolean; // true = 백테스트용 (현재 봉 기준), false = 라이브용 (기본값)
+}
+
 // ─── CONFIG (트레이딩뷰 기본값과 동일) ────────────────────────────────────────
-const PRD = 5;           // Pivot Period
-const MAX_PP = 10;       // Maximum Pivot Points to Check
-const MAX_BARS = 100;    // Maximum Bars to Check
-const SOURCE = "Close";  // "Close" | "High/Low"
-const DONT_CONFIRM = false; // Don't Wait for Confirmation
+const PRD = 5;
+const MAX_PP = 10;
+const MAX_BARS = 100;
+const SOURCE = "Close";
 
 // ─── RSI (Wilder's RMA smoothing — TradingView rsi() 동일) ───────────────────
 function computeRsi(closes: number[], period = 14): number[] {
@@ -56,7 +59,7 @@ function computeRsi(closes: number[], period = 14): number[] {
 function computeEma(data: number[], period: number): number[] {
   const result = new Array(data.length).fill(NaN);
   const k = 2 / (period + 1);
-  let startIdx = data.findIndex((v) => !isNaN(v));
+  const startIdx = data.findIndex((v) => !isNaN(v));
   if (startIdx === -1 || data.length - startIdx < period) return result;
 
   let sum = 0;
@@ -73,8 +76,7 @@ function computeEma(data: number[], period: number): number[] {
 function computeSma(data: number[], period: number): number[] {
   const result = new Array(data.length).fill(NaN);
   for (let i = period - 1; i < data.length; i++) {
-    let sum = 0;
-    let count = 0;
+    let sum = 0, count = 0;
     for (let j = i - period + 1; j <= i; j++) {
       if (!isNaN(data[j])) { sum += data[j]; count++; }
     }
@@ -83,7 +85,7 @@ function computeSma(data: number[], period: number): number[] {
   return result;
 }
 
-// ─── MACD (line + histogram — TV: macd(close,12,26,9)) ───────────────────────
+// ─── MACD line ───────────────────────────────────────────────────────────────
 function computeMacdLine(closes: number[]): number[] {
   const ema12 = computeEma(closes, 12);
   const ema26 = computeEma(closes, 26);
@@ -92,6 +94,7 @@ function computeMacdLine(closes: number[]): number[] {
   );
 }
 
+// ─── MACD Histogram ──────────────────────────────────────────────────────────
 function computeMacdHistogram(closes: number[]): number[] {
   const macdLine = computeMacdLine(closes);
   const signal = computeEma(macdLine, 9);
@@ -100,7 +103,7 @@ function computeMacdHistogram(closes: number[]): number[] {
   );
 }
 
-// ─── OBV (TV: obv 내장) ──────────────────────────────────────────────────────
+// ─── OBV ─────────────────────────────────────────────────────────────────────
 function computeObv(closes: number[], volumes: number[]): number[] {
   const result = new Array(closes.length).fill(NaN);
   result[0] = 0;
@@ -112,7 +115,7 @@ function computeObv(closes: number[], volumes: number[]): number[] {
   return result;
 }
 
-// ─── Momentum (TV: mom(close,10)) ────────────────────────────────────────────
+// ─── Momentum ────────────────────────────────────────────────────────────────
 function computeMom(closes: number[], period = 10): number[] {
   const result = new Array(closes.length).fill(NaN);
   for (let i = period; i < closes.length; i++) {
@@ -121,13 +124,8 @@ function computeMom(closes: number[], period = 10): number[] {
   return result;
 }
 
-// ─── CCI (TV: cci(close,10)) ─────────────────────────────────────────────────
-function computeCci(
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  period = 10
-): number[] {
+// ─── CCI ─────────────────────────────────────────────────────────────────────
+function computeCci(closes: number[], highs: number[], lows: number[], period = 10): number[] {
   const result = new Array(closes.length).fill(NaN);
   const tp = closes.map((c, i) => (highs[i] + lows[i] + c) / 3);
   for (let i = period - 1; i < closes.length; i++) {
@@ -139,26 +137,18 @@ function computeCci(
   return result;
 }
 
-// ─── Stochastic (TV: sma(stoch(close,high,low,14),3)) ────────────────────────
-function computeStoch(
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  period = 14,
-  smoothK = 3
-): number[] {
+// ─── Stochastic ──────────────────────────────────────────────────────────────
+function computeStoch(closes: number[], highs: number[], lows: number[], period = 14, smoothK = 3): number[] {
   const rawK = new Array(closes.length).fill(NaN);
   for (let i = period - 1; i < closes.length; i++) {
-    const sliceH = highs.slice(i - period + 1, i + 1);
-    const sliceL = lows.slice(i - period + 1, i + 1);
-    const hh = Math.max(...sliceH);
-    const ll = Math.min(...sliceL);
+    const hh = Math.max(...highs.slice(i - period + 1, i + 1));
+    const ll = Math.min(...lows.slice(i - period + 1, i + 1));
     rawK[i] = hh === ll ? 0 : ((closes[i] - ll) / (hh - ll)) * 100;
   }
   return computeSma(rawK, smoothK);
 }
 
-// ─── VWmacd (TV: vwma(close,12) - vwma(close,26)) ────────────────────────────
+// ─── VWmacd ──────────────────────────────────────────────────────────────────
 function computeVwma(closes: number[], volumes: number[], period: number): number[] {
   const result = new Array(closes.length).fill(NaN);
   for (let i = period - 1; i < closes.length; i++) {
@@ -180,23 +170,12 @@ function computeVwmacd(closes: number[], volumes: number[]): number[] {
   );
 }
 
-// ─── CMF (TV: Chaikin Money Flow, period=21) ─────────────────────────────────
-function computeCmf(
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  volumes: number[],
-  period = 21
-): number[] {
-  const cmfm = closes.map((c, i) => {
+// ─── CMF ─────────────────────────────────────────────────────────────────────
+function computeCmf(closes: number[], highs: number[], lows: number[], volumes: number[], period = 21): number[] {
+  const cmfv = closes.map((c, i) => {
     const hl = highs[i] - lows[i];
-    return hl === 0 ? 0 : ((c - lows[i]) - (highs[i] - c)) / hl;
+    return hl === 0 ? 0 : (((c - lows[i]) - (highs[i] - c)) / hl) * volumes[i];
   });
-  const cmfv = cmfm.map((m, i) => m * volumes[i]);
-  const sumCmfv = computeSma(cmfv.map((v, i) => v * period), period); // trick: use raw sum via sma*period
-  const sumVol = computeSma(volumes.map((v) => v), period);
-
-  // 정확한 rolling sum
   const result = new Array(closes.length).fill(NaN);
   for (let i = period - 1; i < closes.length; i++) {
     let sCmfv = 0, sVol = 0;
@@ -209,14 +188,8 @@ function computeCmf(
   return result;
 }
 
-// ─── MFI (TV: mfi(close,14)) ─────────────────────────────────────────────────
-function computeMfi(
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  volumes: number[],
-  period = 14
-): number[] {
+// ─── MFI ─────────────────────────────────────────────────────────────────────
+function computeMfi(closes: number[], highs: number[], lows: number[], volumes: number[], period = 14): number[] {
   const result = new Array(closes.length).fill(NaN);
   const tp = closes.map((c, i) => (highs[i] + lows[i] + c) / 3);
   for (let i = period; i < closes.length; i++) {
@@ -231,112 +204,91 @@ function computeMfi(
   return result;
 }
 
-// ─── Pivot High/Low 배열 구성 (TV: pivothigh/pivotlow 동일 방식) ──────────────
-// TV는 bar_index 기준으로 저장. 여기선 배열 index로 대체.
+// ─── Pivot High/Low ───────────────────────────────────────────────────────────
 type Pivot = { index: number; value: number };
 
-function buildPivotHighs(
-  data: number[],       // source (close or high)
-  prd: number
-): Pivot[] {
-  // TV: pivothigh(src, prd, prd) → prd봉 좌우에서 최고점
-  // confirmed: i+prd까지 봐야 확정되므로 마지막 prd봉은 미확정
+function buildPivotHighs(data: number[], prd: number): Pivot[] {
   const pivots: Pivot[] = [];
   for (let i = prd; i < data.length - prd; i++) {
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = 1; j <= prd; j++) {
-      if (data[i - j] >= data[i] || data[i + j] >= data[i]) {
-        isPivot = false;
-        break;
-      }
+      if (data[i - j] >= data[i] || data[i + j] >= data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
   }
   return pivots;
 }
 
-function buildPivotLows(
-  data: number[],
-  prd: number
-): Pivot[] {
+function buildPivotLows(data: number[], prd: number): Pivot[] {
   const pivots: Pivot[] = [];
   for (let i = prd; i < data.length - prd; i++) {
     if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = 1; j <= prd; j++) {
-      if (data[i - j] <= data[i] || data[i + j] <= data[i]) {
-        isPivot = false;
-        break;
-      }
+      if (data[i - j] <= data[i] || data[i + j] <= data[i]) { isPivot = false; break; }
     }
     if (isPivot) pivots.push({ index: i, value: data[i] });
   }
   return pivots;
 }
 
-// ─── 핵심: virtual_line 검증 포함 다이버전스 감지 ─────────────────────────────
-// TV 원본 positive_regular_positive_hidden_divergence() 함수 그대로 포팅
-// cond=1 → positive_regular, cond=2 → positive_hidden
+// ─── virtual_line 검증 포함 다이버전스 감지 ───────────────────────────────────
 function positiveRegularOrHidden(
-  src: number[],          // 인디케이터 값 배열
-  closes: number[],       // 가격 종가 배열
-  highs: number[],
+  src: number[],
+  closes: number[],
   lows: number[],
-  plPositions: Pivot[],   // Pivot Low 배열 (bar_index 순 내림차순, TV array.unshift 방식)
-  barIdx: number,         // 현재 bar index (배열 끝)
-  cond: 1 | 2
+  plPositions: Pivot[],
+  barIdx: number,
+  cond: 1 | 2,
+  dontConfirm: boolean
 ): number {
-  // TV: startpoint = dontconfirm ? 0 : 1
-  const startpoint = DONT_CONFIRM ? 0 : 1;
+  const startpoint = dontConfirm ? 0 : 1;
   const currentBar = barIdx - startpoint;
+  if (currentBar < 1) return 0;
+
   const srcCurrent = src[currentBar];
   const closeCurrent = closes[currentBar];
+  if (isNaN(srcCurrent) || isNaN(closeCurrent)) return 0;
 
-  // TV: if dontconfirm or src > src[1] or close > close[1]
-  const srcPrev = src[currentBar - 1] ?? NaN;
-  const closePrev = closes[currentBar - 1] ?? NaN;
   const conditionMet =
-    DONT_CONFIRM ||
-    srcCurrent > srcPrev ||
-    closeCurrent > closePrev;
+    dontConfirm ||
+    srcCurrent > (src[currentBar - 1] ?? NaN) ||
+    closeCurrent > (closes[currentBar - 1] ?? NaN);
 
   if (!conditionMet) return 0;
 
-  // prsc = source == "Close" ? close : low
   const prsc = SOURCE === "Close" ? closes : lows;
 
   for (let x = 0; x < Math.min(plPositions.length, MAX_PP); x++) {
     const pivotBarIdx = plPositions[x].index;
-    const len = barIdx - pivotBarIdx + PRD; // TV: bar_index - array.get(pl_positions, x) + prd
+    const len = barIdx - pivotBarIdx + PRD;
 
     if (pivotBarIdx === 0 || len > MAX_BARS) break;
     if (len <= 5) continue;
 
-    const srcAtPivot = src[barIdx - len] ?? NaN;
-    const prscAtPivot = prsc[barIdx - len] ?? NaN;
+    const srcAtPivot = src[barIdx - len];
     const plVal = plPositions[x].value;
+    if (isNaN(srcAtPivot)) continue;
 
     const divCondition =
       cond === 1
-        ? srcCurrent > srcAtPivot && prsc[currentBar] < plVal      // positive regular
-        : srcCurrent < srcAtPivot && prsc[currentBar] > plVal;     // positive hidden
+        ? srcCurrent > srcAtPivot && prsc[currentBar] < plVal
+        : srcCurrent < srcAtPivot && prsc[currentBar] > plVal;
 
     if (!divCondition) continue;
 
-    // ── virtual_line 검증 (TV 핵심 로직) ──────────────────────────────────
+    // virtual_line 검증
     const slope1 = (srcCurrent - srcAtPivot) / (len - startpoint);
     let vLine1 = srcCurrent - slope1;
-
     const slope2 = (closeCurrent - closes[barIdx - len]) / (len - startpoint);
     let vLine2 = closeCurrent - slope2;
 
     let arrived = true;
     for (let y = 1 + startpoint; y <= len - 1; y++) {
-      const srcY = src[barIdx - y] ?? NaN;
-      const closeY = closes[barIdx - y] ?? NaN;
-
-      if (srcY < vLine1 || closeY < vLine2) {
+      const srcY = src[barIdx - y];
+      const closeY = closes[barIdx - y];
+      if (isNaN(srcY) || isNaN(closeY) || srcY < vLine1 || closeY < vLine2) {
         arrived = false;
         break;
       }
@@ -350,28 +302,27 @@ function positiveRegularOrHidden(
   return 0;
 }
 
-// TV 원본 negative_regular_negative_hidden_divergence() 포팅
-// cond=1 → negative_regular, cond=2 → negative_hidden
 function negativeRegularOrHidden(
   src: number[],
   closes: number[],
   highs: number[],
-  lows: number[],
   phPositions: Pivot[],
   barIdx: number,
-  cond: 1 | 2
+  cond: 1 | 2,
+  dontConfirm: boolean
 ): number {
-  const startpoint = DONT_CONFIRM ? 0 : 1;
+  const startpoint = dontConfirm ? 0 : 1;
   const currentBar = barIdx - startpoint;
+  if (currentBar < 1) return 0;
+
   const srcCurrent = src[currentBar];
   const closeCurrent = closes[currentBar];
+  if (isNaN(srcCurrent) || isNaN(closeCurrent)) return 0;
 
-  const srcPrev = src[currentBar - 1] ?? NaN;
-  const closePrev = closes[currentBar - 1] ?? NaN;
   const conditionMet =
-    DONT_CONFIRM ||
-    srcCurrent < srcPrev ||
-    closeCurrent < closePrev;
+    dontConfirm ||
+    srcCurrent < (src[currentBar - 1] ?? NaN) ||
+    closeCurrent < (closes[currentBar - 1] ?? NaN);
 
   if (!conditionMet) return 0;
 
@@ -384,30 +335,28 @@ function negativeRegularOrHidden(
     if (pivotBarIdx === 0 || len > MAX_BARS) break;
     if (len <= 5) continue;
 
-    const srcAtPivot = src[barIdx - len] ?? NaN;
-    const prscAtPivot = prsc[barIdx - len] ?? NaN;
+    const srcAtPivot = src[barIdx - len];
     const phVal = phPositions[x].value;
+    if (isNaN(srcAtPivot)) continue;
 
     const divCondition =
       cond === 1
-        ? srcCurrent < srcAtPivot && prsc[currentBar] > phVal      // negative regular
-        : srcCurrent > srcAtPivot && prsc[currentBar] < phVal;     // negative hidden
+        ? srcCurrent < srcAtPivot && prsc[currentBar] > phVal
+        : srcCurrent > srcAtPivot && prsc[currentBar] < phVal;
 
     if (!divCondition) continue;
 
-    // ── virtual_line 검증 ──────────────────────────────────────────────────
+    // virtual_line 검증
     const slope1 = (srcCurrent - srcAtPivot) / (len - startpoint);
     let vLine1 = srcCurrent - slope1;
-
     const slope2 = (closeCurrent - closes[barIdx - len]) / (len - startpoint);
     let vLine2 = closeCurrent - slope2;
 
     let arrived = true;
     for (let y = 1 + startpoint; y <= len - 1; y++) {
-      const srcY = src[barIdx - y] ?? NaN;
-      const closeY = closes[barIdx - y] ?? NaN;
-
-      if (srcY > vLine1 || closeY > vLine2) {
+      const srcY = src[barIdx - y];
+      const closeY = closes[barIdx - y];
+      if (isNaN(srcY) || isNaN(closeY) || srcY > vLine1 || closeY > vLine2) {
         arrived = false;
         break;
       }
@@ -421,61 +370,46 @@ function negativeRegularOrHidden(
   return 0;
 }
 
-// ─── 인디케이터별 4종 다이버전스 계산 ────────────────────────────────────────
-function calculateDivs(
-  src: number[],
-  closes: number[],
-  highs: number[],
-  lows: number[],
-  plPositions: Pivot[],
-  phPositions: Pivot[],
-  barIdx: number
-): [number, number, number, number] {
-  return [
-    positiveRegularOrHidden(src, closes, highs, lows, plPositions, barIdx, 1), // positive_regular
-    negativeRegularOrHidden(src, closes, highs, lows, phPositions, barIdx, 1), // negative_regular
-    positiveRegularOrHidden(src, closes, highs, lows, plPositions, barIdx, 2), // positive_hidden
-    negativeRegularOrHidden(src, closes, highs, lows, phPositions, barIdx, 2), // negative_hidden
-  ];
-}
-
 // ─── 메인 분석 함수 ───────────────────────────────────────────────────────────
 export function analyzeDivergences(
   candles: Candle[],
   symbol: string,
-  timeframe: string
+  timeframe: string,
+  options?: AnalyzeOptions
 ) {
-  const closes = candles.map((c) => c.close);
-  const highs = candles.map((c) => c.high);
-  const lows = candles.map((c) => c.low);
+  // 백테스트: dontConfirm=true (현재 봉 기준으로 즉시 감지)
+  // 라이브:   dontConfirm=false (기본값, 이전 봉 확인 후 진입)
+  const dontConfirm = options?.dontConfirm ?? false;
+
+  const closes  = candles.map((c) => c.close);
+  const highs   = candles.map((c) => c.high);
+  const lows    = candles.map((c) => c.low);
   const volumes = candles.map((c) => c.volume);
 
-  // 인디케이터 계산
-  const rsi = computeRsi(closes, 14);
-  const macdLine = computeMacdLine(closes);
-  const macdHist = computeMacdHistogram(closes);
-  const obv = computeObv(closes, volumes);
-  const mom = computeMom(closes, 10);
-  const cci = computeCci(closes, highs, lows, 10);
-  const stoch = computeStoch(closes, highs, lows, 14, 3);
+  const rsi    = computeRsi(closes, 14);
+  const macdL  = computeMacdLine(closes);
+  const macdH  = computeMacdHistogram(closes);
+  const obv    = computeObv(closes, volumes);
+  const mom    = computeMom(closes, 10);
+  const cci    = computeCci(closes, highs, lows, 10);
+  const stoch  = computeStoch(closes, highs, lows, 14, 3);
   const vwmacd = computeVwmacd(closes, volumes);
-  const cmf = computeCmf(closes, highs, lows, volumes, 21);
-  const mfi = computeMfi(closes, highs, lows, volumes, 14);
+  const cmf    = computeCmf(closes, highs, lows, volumes, 21);
+  const mfi    = computeMfi(closes, highs, lows, volumes, 14);
 
-  // 피벗 소스: TV SOURCE="Close" 기준
-  const pivotSrc = SOURCE === "Close" ? closes : closes; // High/Low 옵션은 highs/lows
+  const pivotSrc = closes; // SOURCE = "Close"
   const phPivots = buildPivotHighs(pivotSrc, PRD);
   const plPivots = buildPivotLows(pivotSrc, PRD);
 
-  // TV는 최신 피벗이 앞에 오도록 unshift → reverse()로 동일하게
+  // TV: array.unshift → 최신 피벗이 앞에 오도록
   const plDesc = [...plPivots].reverse();
   const phDesc = [...phPivots].reverse();
 
   const barIdx = closes.length - 1;
 
   const indicators: Array<{ name: string; data: number[] }> = [
-    { name: "MACD",   data: macdLine },
-    { name: "Hist",   data: macdHist },
+    { name: "MACD",   data: macdL },
+    { name: "Hist",   data: macdH },
     { name: "RSI",    data: rsi },
     { name: "Stoch",  data: stoch },
     { name: "CCI",    data: cci },
@@ -489,15 +423,10 @@ export function analyzeDivergences(
   const signals: DivergenceSignal[] = [];
 
   for (const ind of indicators) {
-    const [posReg, negReg, posHid, negHid] = calculateDivs(
-      ind.data,
-      closes,
-      highs,
-      lows,
-      plDesc,
-      phDesc,
-      barIdx
-    );
+    const posReg = positiveRegularOrHidden(ind.data, closes, lows,  plDesc, barIdx, 1, dontConfirm);
+    const negReg = negativeRegularOrHidden(ind.data, closes, highs, phDesc, barIdx, 1, dontConfirm);
+    const posHid = positiveRegularOrHidden(ind.data, closes, lows,  plDesc, barIdx, 2, dontConfirm);
+    const negHid = negativeRegularOrHidden(ind.data, closes, highs, phDesc, barIdx, 2, dontConfirm);
 
     const typeMap: Array<[number, DivergenceSignal["type"], string]> = [
       [posReg, "positive_regular", "Bullish Regular Divergence"],
@@ -511,7 +440,7 @@ export function analyzeDivergences(
         signals.push({
           indicator: ind.name,
           type,
-          strength: len, // TV는 strength 개념 없음 → len(거리)으로 대체
+          strength: len,
           barIndex: barIdx,
           description: `${ind.name}: ${desc}`,
         });
@@ -527,11 +456,8 @@ export function analyzeDivergences(
   ).length;
 
   const overallBias: "bullish" | "bearish" | "neutral" =
-    bullishCount > bearishCount
-      ? "bullish"
-      : bearishCount > bullishCount
-      ? "bearish"
-      : "neutral";
+    bullishCount > bearishCount ? "bullish" :
+    bearishCount > bullishCount ? "bearish" : "neutral";
 
   return {
     symbol,
