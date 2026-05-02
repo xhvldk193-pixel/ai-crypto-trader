@@ -194,7 +194,7 @@ export function runBacktest(candles: BacktestCandle[], params: BacktestParams): 
     // 2) Look for a new entry on the close of this bar.
     if (!open) {
       const window = candles.slice(0, i + 1);
-      const div = analyzeDivergences(window, params.symbol, params.timeframe);
+      const div = analyzeDivergences(window, params.symbol, params.timeframe, { dontConfirm: true });
       if (div.bullishCount + div.bearishCount > 0) {
         const atrPercent = computeAtrPercent(window, 14);
         const decision = decideRuleBased({
