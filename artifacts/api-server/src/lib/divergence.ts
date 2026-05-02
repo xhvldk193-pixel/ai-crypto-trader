@@ -1,16 +1,59 @@
-// Divergence analysis — Regular Divergence Only (Hidden Removed)
+// Divergence analysis — Original structure with Hidden Divergences removed
 
 export type Candle = { timestamp: number; open: number; high: number; low: number; close: number; volume: number };
 
 type DivergenceSignal = {
   indicator: string;
-  type: "bullish_regular" | "bearish_regular"; // 히든 타입 삭제
+  type: "positive_regular" | "negative_regular" | "positive_hidden" | "negative_hidden";
   strength: number;
   barIndex: number;
   description: string;
 };
 
-// ... (computeRsi, sma, ema, computeMacd, computeObv, computeMom, computeCci 함수는 동일)
+// ... (computeRsi, sma, ema, computeMacd, computeObv, computeMom, computeCci 함수는 원본과 동일)
+
+function findPivotHighs(data: number[], period = 5): Array<{ index: number; value: number }> {
+  const pivots: Array<{ index: number; value: number }> = [];
+  for (let i = period; i < data.length - period; i++) {
+    if (isNaN(data[i])) continue;
+    let isPivot = true;
+    for (let j = -period; j <= period; j++) {
+      if (j !== 0 && data[i + j] >= data[i]) { isPivot = false; break; }
+    }
+    if (isPivot) pivots.push({ index: i, value: data[i] });
+  }
+  return pivots;
+}
+
+function findPivotLows(data: number[], period = 5): Array<{ index: number; value: number }> {
+  const pivots: Array<{ index: number; value: number }> = [];
+  for (let i = period; i < data.length - period; i++) {
+    if (isNaN(data[i])) continue;
+    let isPivot = true;
+    for (let j = -period; j <= period; j++) {
+      if (j !== 0 && data[i + j] <= data[i]) { isPivot = false; break; }
+    }
+    if (isPivot) pivots.push({ index: i, value: data[i] });
+  }
+  return pivots;
+}
+
+function findNearestPivot(
+  pivots: Array<{ index: number; value: number }>,
+  targetIndex: number,
+  tolerance = 10
+): { index: number; value: number } | null {
+  let best: { index: number; value: number } | null = null;
+  let bestDist = Infinity;
+  for (const p of pivots) {
+    const dist = Math.abs(p.index - targetIndex);
+    if (dist <= tolerance && dist < bestDist) {
+      bestDist = dist;
+      best = p;
+    }
+  }
+  return best;
+}
 
 function detectDivergences(
   priceLows: Array<{ index: number; value: number }>,
@@ -21,61 +64,50 @@ function detectDivergences(
   maxLookback = 5
 ): DivergenceSignal[] {
   const signals: DivergenceSignal[] = [];
-  const MIN_STRENGTH = 0.03;
 
-  // ✅ Bullish Regular (강세 반전 - BUY 신호)
-  // 가격은 더 낮아졌는데(Lower Low), 지표는 더 높아졌을 때(Higher Low)
+  // ✅ Positive Regular (상승 반전)만 남김
   const lastPriceLow = priceLows[priceLows.length - 1];
   const lastIndLow = lastPriceLow ? findNearestPivot(indLows, lastPriceLow.index) : null;
-  
   if (lastPriceLow && lastIndLow) {
     const priorPriceLows = priceLows.slice(0, -1).slice(-maxLookback);
     for (const ppl of priorPriceLows) {
       const matchedIndLow = findNearestPivot(indLows, ppl.index);
       if (!matchedIndLow) continue;
-      
       if (lastPriceLow.value < ppl.value && lastIndLow.value > matchedIndLow.value) {
-        const strength = Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1);
-        if (strength >= MIN_STRENGTH) {
-          signals.push({
-            indicator: indicatorName,
-            type: "bullish_regular",
-            strength: Math.min(1, strength),
-            barIndex: lastPriceLow.index,
-            description: `${indicatorName}: Bullish Regular (Buy)`
-          });
-          break;
-        }
+        signals.push({
+          indicator: indicatorName,
+          type: "positive_regular",
+          strength: Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1),
+          barIndex: lastPriceLow.index,
+          description: `${indicatorName}: Bullish Regular Divergence`
+        });
+        break;
       }
     }
   }
 
-  // ✅ Bearish Regular (약세 반전 - SELL 신호)
-  // 가격은 더 높아졌는데(Higher High), 지표는 더 낮아졌을 때(Lower High)
+  // ✅ Negative Regular (하락 반전)만 남김
   const lastPriceHigh = priceHighs[priceHighs.length - 1];
   const lastIndHigh = lastPriceHigh ? findNearestPivot(indHighs, lastPriceHigh.index) : null;
-
   if (lastPriceHigh && lastIndHigh) {
     const priorPriceHighs = priceHighs.slice(0, -1).slice(-maxLookback);
     for (const pph of priorPriceHighs) {
       const matchedIndHigh = findNearestPivot(indHighs, pph.index);
       if (!matchedIndHigh) continue;
-
       if (lastPriceHigh.value > pph.value && lastIndHigh.value < matchedIndHigh.value) {
-        const strength = Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1);
-        if (strength >= MIN_STRENGTH) {
-          signals.push({
-            indicator: indicatorName,
-            type: "bearish_regular",
-            strength: Math.min(1, strength),
-            barIndex: lastPriceHigh.index,
-            description: `${indicatorName}: Bearish Regular (Sell)`
-          });
-          break;
-        }
+        signals.push({
+          indicator: indicatorName,
+          type: "negative_regular",
+          strength: Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1),
+          barIndex: lastPriceHigh.index,
+          description: `${indicatorName}: Bearish Regular Divergence`
+        });
+        break;
       }
     }
   }
+
+  // ❌ 히든 다이버전스 로직(Positive Hidden, Negative Hidden)은 모두 제거되었습니다.
 
   return signals;
 }
@@ -105,12 +137,13 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
     allSignals.push(...divs);
   }
 
-  const bullishCount = allSignals.filter(s => s.type === "bullish_regular").length;
-  const bearishCount = allSignals.filter(s => s.type === "bearish_regular").length;
-
-  let overallBias: "bullish" | "bearish" | "neutral" = "neutral";
-  if (bullishCount > bearishCount) overallBias = "bullish";
-  else if (bearishCount > bullishCount) overallBias = "bearish";
+  // 집계 로직 (히든은 어차피 발생하지 않으므로 filter에서 걸러짐)
+  const bullishCount = allSignals.filter(s => s.type === "positive_regular").length;
+  const bearishCount = allSignals.filter(s => s.type === "negative_regular").length;
+  
+  const overallBias: "bullish" | "bearish" | "neutral" =
+    bullishCount > bearishCount ? "bullish" :
+    bearishCount > bullishCount ? "bearish" : "neutral";
 
   return {
     symbol,
