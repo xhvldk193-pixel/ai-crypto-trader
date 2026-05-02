@@ -85,6 +85,7 @@ function computeCci(closes: number[], highs: number[], lows: number[], period = 
 function findPivotHighs(data: number[], period = 5): Array<{ index: number; value: number }> {
   const pivots: Array<{ index: number; value: number }> = [];
   for (let i = period; i < data.length - period; i++) {
+    if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
       if (j !== 0 && data[i + j] >= data[i]) { isPivot = false; break; }
@@ -97,6 +98,7 @@ function findPivotHighs(data: number[], period = 5): Array<{ index: number; valu
 function findPivotLows(data: number[], period = 5): Array<{ index: number; value: number }> {
   const pivots: Array<{ index: number; value: number }> = [];
   for (let i = period; i < data.length - period; i++) {
+    if (isNaN(data[i])) continue;
     let isPivot = true;
     for (let j = -period; j <= period; j++) {
       if (j !== 0 && data[i + j] <= data[i]) { isPivot = false; break; }
@@ -106,30 +108,48 @@ function findPivotLows(data: number[], period = 5): Array<{ index: number; value
   return pivots;
 }
 
+function findNearestPivot(
+  pivots: Array<{ index: number; value: number }>,
+  targetIndex: number,
+  tolerance = 10
+): { index: number; value: number } | null {
+  let best: { index: number; value: number } | null = null;
+  let bestDist = Infinity;
+  for (const p of pivots) {
+    const dist = Math.abs(p.index - targetIndex);
+    if (dist <= tolerance && dist < bestDist) {
+      bestDist = dist;
+      best = p;
+    }
+  }
+  return best;
+}
+
 function detectDivergences(
   priceLows: Array<{ index: number; value: number }>,
   priceHighs: Array<{ index: number; value: number }>,
-  indicatorData: number[],
+  indLows: Array<{ index: number; value: number }>,
+  indHighs: Array<{ index: number; value: number }>,
   indicatorName: string,
   maxLookback = 5
 ): DivergenceSignal[] {
   const signals: DivergenceSignal[] = [];
-  const n = indicatorData.length;
-  const lastIdx = n - 1;
 
-  // Positive Regular: price lower low, indicator higher low → bullish reversal
-  const lastLow = priceLows[priceLows.length - 1];
-  if (lastLow && lastLow.index > n - 30) {
-    const priorLows = priceLows.slice(0, -1).slice(-maxLookback);
-    for (const pl of priorLows) {
-      if (lastLow.value < pl.value && indicatorData[lastLow.index] > indicatorData[pl.index]) {
-        const strength = Math.abs(indicatorData[lastLow.index] - indicatorData[pl.index]) /
-          (Math.abs(indicatorData[pl.index]) || 1);
+  // ✅ Positive Regular: 가격 저점↓, 지표 저점↑ → 강세 반전
+  const lastPriceLow = priceLows[priceLows.length - 1];
+  const lastIndLow = lastPriceLow ? findNearestPivot(indLows, lastPriceLow.index) : null;
+  if (lastPriceLow && lastIndLow) {
+    const priorPriceLows = priceLows.slice(0, -1).slice(-maxLookback);
+    for (const ppl of priorPriceLows) {
+      const matchedIndLow = findNearestPivot(indLows, ppl.index);
+      if (!matchedIndLow) continue;
+      if (lastPriceLow.value < ppl.value && lastIndLow.value > matchedIndLow.value) {
+        const strength = Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1);
         signals.push({
           indicator: indicatorName,
           type: "positive_regular",
           strength: Math.min(1, strength),
-          barIndex: lastLow.index,
+          barIndex: lastPriceLow.index,
           description: `${indicatorName}: Bullish Regular Divergence — price lower low, indicator higher low`
         });
         break;
@@ -137,19 +157,21 @@ function detectDivergences(
     }
   }
 
-  // Negative Regular: price higher high, indicator lower high → bearish reversal
-  const lastHigh = priceHighs[priceHighs.length - 1];
-  if (lastHigh && lastHigh.index > n - 30) {
-    const priorHighs = priceHighs.slice(0, -1).slice(-maxLookback);
-    for (const ph of priorHighs) {
-      if (lastHigh.value > ph.value && indicatorData[lastHigh.index] < indicatorData[ph.index]) {
-        const strength = Math.abs(indicatorData[lastHigh.index] - indicatorData[ph.index]) /
-          (Math.abs(indicatorData[ph.index]) || 1);
+  // ✅ Negative Regular: 가격 고점↑, 지표 고점↓ → 약세 반전
+  const lastPriceHigh = priceHighs[priceHighs.length - 1];
+  const lastIndHigh = lastPriceHigh ? findNearestPivot(indHighs, lastPriceHigh.index) : null;
+  if (lastPriceHigh && lastIndHigh) {
+    const priorPriceHighs = priceHighs.slice(0, -1).slice(-maxLookback);
+    for (const pph of priorPriceHighs) {
+      const matchedIndHigh = findNearestPivot(indHighs, pph.index);
+      if (!matchedIndHigh) continue;
+      if (lastPriceHigh.value > pph.value && lastIndHigh.value < matchedIndHigh.value) {
+        const strength = Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1);
         signals.push({
           indicator: indicatorName,
           type: "negative_regular",
           strength: Math.min(1, strength),
-          barIndex: lastHigh.index,
+          barIndex: lastPriceHigh.index,
           description: `${indicatorName}: Bearish Regular Divergence — price higher high, indicator lower high`
         });
         break;
@@ -157,18 +179,19 @@ function detectDivergences(
     }
   }
 
-  // Positive Hidden: price higher low, indicator lower low → bullish continuation
-  if (lastLow && lastLow.index > n - 30) {
-    const priorLows = priceLows.slice(0, -1).slice(-maxLookback);
-    for (const pl of priorLows) {
-      if (lastLow.value > pl.value && indicatorData[lastLow.index] < indicatorData[pl.index]) {
-        const strength = Math.abs(indicatorData[lastLow.index] - indicatorData[pl.index]) /
-          (Math.abs(indicatorData[pl.index]) || 1);
+  // ✅ Positive Hidden: 가격 저점↑, 지표 저점↓ → 강세 지속
+  if (lastPriceLow && lastIndLow) {
+    const priorPriceLows = priceLows.slice(0, -1).slice(-maxLookback);
+    for (const ppl of priorPriceLows) {
+      const matchedIndLow = findNearestPivot(indLows, ppl.index);
+      if (!matchedIndLow) continue;
+      if (lastPriceLow.value > ppl.value && lastIndLow.value < matchedIndLow.value) {
+        const strength = Math.abs(lastIndLow.value - matchedIndLow.value) / (Math.abs(matchedIndLow.value) || 1);
         signals.push({
           indicator: indicatorName,
           type: "positive_hidden",
           strength: Math.min(1, strength),
-          barIndex: lastLow.index,
+          barIndex: lastPriceLow.index,
           description: `${indicatorName}: Bullish Hidden Divergence — price higher low, indicator lower low`
         });
         break;
@@ -176,18 +199,19 @@ function detectDivergences(
     }
   }
 
-  // Negative Hidden: price lower high, indicator higher high → bearish continuation
-  if (lastHigh && lastHigh.index > n - 30) {
-    const priorHighs = priceHighs.slice(0, -1).slice(-maxLookback);
-    for (const ph of priorHighs) {
-      if (lastHigh.value < ph.value && indicatorData[lastHigh.index] > indicatorData[ph.index]) {
-        const strength = Math.abs(indicatorData[lastHigh.index] - indicatorData[ph.index]) /
-          (Math.abs(indicatorData[ph.index]) || 1);
+  // ✅ Negative Hidden: 가격 고점↓, 지표 고점↑ → 약세 지속
+  if (lastPriceHigh && lastIndHigh) {
+    const priorPriceHighs = priceHighs.slice(0, -1).slice(-maxLookback);
+    for (const pph of priorPriceHighs) {
+      const matchedIndHigh = findNearestPivot(indHighs, pph.index);
+      if (!matchedIndHigh) continue;
+      if (lastPriceHigh.value < pph.value && lastIndHigh.value > matchedIndHigh.value) {
+        const strength = Math.abs(lastIndHigh.value - matchedIndHigh.value) / (Math.abs(matchedIndHigh.value) || 1);
         signals.push({
           indicator: indicatorName,
           type: "negative_hidden",
           strength: Math.min(1, strength),
-          barIndex: lastHigh.index,
+          barIndex: lastPriceHigh.index,
           description: `${indicatorName}: Bearish Hidden Divergence — price lower high, indicator higher high`
         });
         break;
@@ -217,9 +241,10 @@ export function analyzeDivergences(candles: Candle[], symbol: string, timeframe:
 
   const allSignals: DivergenceSignal[] = [];
   for (const ind of indicators) {
+    // ✅ 지표의 피벗 고점/저점을 직접 계산하여 detectDivergences에 전달
     const indLows = findPivotLows(ind.data);
     const indHighs = findPivotHighs(ind.data);
-    const divs = detectDivergences(priceLows, priceHighs, ind.data, ind.name);
+    const divs = detectDivergences(priceLows, priceHighs, indLows, indHighs, ind.name);
     allSignals.push(...divs);
   }
 
