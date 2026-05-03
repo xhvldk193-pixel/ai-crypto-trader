@@ -25,7 +25,7 @@ export interface AnalyzeOptions {
 // ─── CONFIG (트레이딩뷰 기본값과 동일) ────────────────────────────────────────
 const PRD = 5;
 const MAX_PP = 10;
-const MAX_BARS = 100;
+const MAX_BARS = 300;
 const SOURCE = "Close";
 
 // ─── RSI (Wilder's RMA smoothing — TradingView rsi() 동일) ───────────────────
@@ -440,7 +440,7 @@ export function analyzeDivergences(
         signals.push({
           indicator: ind.name,
           type,
-          strength: Math.max(0, Math.min(1, 1 - (len / MAX_BARS))),
+          strength: len,
           barIndex: barIdx,
           description: `${ind.name}: ${desc}`,
         });
