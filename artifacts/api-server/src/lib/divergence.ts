@@ -233,7 +233,7 @@ function buildPivotLows(data: number[], prd: number): Pivot[] {
   return pivots;
 }
 
-// ─── virtual_line 검증 포함 다이버전스 감지 ───────────────────────────────────
+// ─── 다이버전스 감지 ───────────────────────────────────────────────────────────
 function positiveRegularOrHidden(
   src: number[],
   closes: number[],
@@ -278,25 +278,7 @@ function positiveRegularOrHidden(
 
     if (!divCondition) continue;
 
-    // virtual_line 검증
-    const slope1 = (srcCurrent - srcAtPivot) / (len - startpoint);
-    let vLine1 = srcCurrent - slope1;
-    const slope2 = (closeCurrent - closes[barIdx - len]) / (len - startpoint);
-    let vLine2 = closeCurrent - slope2;
-
-    let arrived = true;
-    for (let y = 1 + startpoint; y <= len - 1; y++) {
-      const srcY = src[barIdx - y];
-      const closeY = closes[barIdx - y];
-      if (isNaN(srcY) || isNaN(closeY) || srcY < vLine1 || closeY < vLine2) {
-        arrived = false;
-        break;
-      }
-      vLine1 -= slope1;
-      vLine2 -= slope2;
-    }
-
-    if (arrived) return len;
+    return len;
   }
 
   return 0;
@@ -346,25 +328,7 @@ function negativeRegularOrHidden(
 
     if (!divCondition) continue;
 
-    // virtual_line 검증
-    const slope1 = (srcCurrent - srcAtPivot) / (len - startpoint);
-    let vLine1 = srcCurrent - slope1;
-    const slope2 = (closeCurrent - closes[barIdx - len]) / (len - startpoint);
-    let vLine2 = closeCurrent - slope2;
-
-    let arrived = true;
-    for (let y = 1 + startpoint; y <= len - 1; y++) {
-      const srcY = src[barIdx - y];
-      const closeY = closes[barIdx - y];
-      if (isNaN(srcY) || isNaN(closeY) || srcY > vLine1 || closeY > vLine2) {
-        arrived = false;
-        break;
-      }
-      vLine1 -= slope1;
-      vLine2 -= slope2;
-    }
-
-    if (arrived) return len;
+    return len;
   }
 
   return 0;
