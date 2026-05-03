@@ -315,3 +315,4 @@ export function runBacktest(candles: BacktestCandle[], params: BacktestParams): 
     equityCurve,
   };
 }
+
