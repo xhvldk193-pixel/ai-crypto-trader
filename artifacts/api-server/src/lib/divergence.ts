@@ -440,7 +440,7 @@ export function analyzeDivergences(
         signals.push({
           indicator: ind.name,
           type,
-          strength: len,
+          strength: Math.max(0, Math.min(1, 1 - (len / MAX_BARS))),
           barIndex: barIdx,
           description: `${ind.name}: ${desc}`,
         });
