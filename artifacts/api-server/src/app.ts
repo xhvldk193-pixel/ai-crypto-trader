@@ -7,7 +7,6 @@ import { sessionMiddleware } from "./lib/auth";
 import path from "path";
 import { fileURLToPath } from "url";
 import streamRouter from "./routes/stream";
-app.use("/stream", streamRouter);
 
 const app: Express = express();
 
@@ -67,6 +66,7 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use(sessionMiddleware);
 
 app.use("/api", router);
+app.use("/stream", streamRouter);
 
 // In production, serve the built frontend static files and fall back to index.html for SPA routing
 if (process.env.NODE_ENV === "production") {
