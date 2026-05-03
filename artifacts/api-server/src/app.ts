@@ -7,9 +7,11 @@ import { sessionMiddleware } from "./lib/auth";
 import path from "path";
 import { fileURLToPath } from "url";
 import streamRouter from "./routes/stream";
-app.use("/stream", streamRouter);
+
 
 const app: Express = express();
+
+app.use("/stream", streamRouter);
 
 // Trust the Replit proxy so secure cookies and rate-limit IP detection work behind TLS termination
 app.set("trust proxy", 1);
