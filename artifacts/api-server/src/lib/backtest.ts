@@ -177,6 +177,11 @@ export function runBacktest(candles: BacktestCandle[], params: BacktestParams): 
     open = null;
   };
 
+  // Pre-compute divergence for every bar using the full candle array so that
+  // pivot detection is stable (not re-built on a growing slice each iteration).
+  // We pass the full candles array and use barIdx to read per-bar results.
+  const fullDiv = analyzeDivergences(candles, params.symbol, params.timeframe, { dontConfirm: true });
+
   const start = Math.max(WARMUP_BARS, 30);
   for (let i = start; i < candles.length; i++) {
     const bar = candles[i];
@@ -193,15 +198,21 @@ export function runBacktest(candles: BacktestCandle[], params: BacktestParams): 
 
     // 2) Look for a new entry on the close of this bar.
     if (!open) {
-      const window = candles.slice(0, i + 1);
-      const div = analyzeDivergences(window, params.symbol, params.timeframe, { dontConfirm: true });
+      // Use the pre-computed full-array divergence (stable pivots).
+      // Filter signals that were detected at or before this bar.
+      const barSignals = fullDiv.signals.filter((s) => s.barIndex !== undefined ? s.barIndex <= i : true);
+      const bullishCount = barSignals.filter((s) => s.type.startsWith("positive")).length;
+      const bearishCount = barSignals.filter((s) => s.type.startsWith("negative")).length;
+      const div = { bullishCount, bearishCount, signals: barSignals };
+
       if (div.bullishCount + div.bearishCount > 0) {
+        const window = candles.slice(Math.max(0, i - 50), i + 1);
         const atrPercent = computeAtrPercent(window, 14);
         const decision = decideRuleBased({
           bullishCount: div.bullishCount,
           bearishCount: div.bearishCount,
-          avgBullStrength: avgStrength(div.signals.filter((s) => s.type.startsWith("positive"))),
-          avgBearStrength: avgStrength(div.signals.filter((s) => s.type.startsWith("negative"))),
+          avgBullStrength: avgStrength(barSignals.filter((s) => s.type.startsWith("positive"))),
+          avgBearStrength: avgStrength(barSignals.filter((s) => s.type.startsWith("negative"))),
           atrPercent,
         });
         if (
